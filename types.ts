@@ -29,3 +29,10 @@ export interface TreeDataNode {
   children?: TreeDataNode[];
   data: ChatNode;
 }
+
+export interface ApiUsageStats {
+  totalCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCost: number;
+}

@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { ChatNode, Project, ViewMode } from './types';
+import { ChatNode, Project, ViewMode, ApiUsageStats } from './types';
 import Sidebar from './components/Sidebar';
 import ChatView from './components/ChatView';
 import GraphView from './components/GraphView';
+import ApiStatsPanel, { calculateCost } from './components/ApiStatsPanel';
 import { generateChatResponse } from './services/geminiService';
 import { getAncestorPath } from './utils/treeUtils';
 import { Send, GitGraph, MessageSquare, Loader2, Sparkles } from 'lucide-react';
@@ -37,6 +38,10 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.LINEAR);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [apiStats, setApiStats] = useState<ApiUsageStats>(() => {
+    const saved = localStorage.getItem('arbor_api_stats');
+    return saved ? JSON.parse(saved) : { totalCalls: 0, inputTokens: 0, outputTokens: 0, estimatedCost: 0 };
+  });
 
   // Persistence
   useEffect(() => {
@@ -55,6 +60,10 @@ const App: React.FC = () => {
     if (activeNodeId) localStorage.setItem('arbor_active_node', activeNodeId);
   }, [activeNodeId]);
 
+  useEffect(() => {
+    localStorage.setItem('arbor_api_stats', JSON.stringify(apiStats));
+  }, [apiStats]);
+
   const activePath = useMemo(() => {
     if (!activeNodeId) return [];
     return getAncestorPath(nodes, activeNodeId);
@@ -70,7 +79,19 @@ const App: React.FC = () => {
 
     try {
       const history = activePath;
-      const { response, summary } = await generateChatResponse(history, promptText);
+      const { response, summary, usage } = await generateChatResponse(history, promptText);
+
+      // Update API stats
+      setApiStats(prev => {
+        const newInputTokens = prev.inputTokens + usage.inputTokens;
+        const newOutputTokens = prev.outputTokens + usage.outputTokens;
+        return {
+          totalCalls: prev.totalCalls + 1,
+          inputTokens: newInputTokens,
+          outputTokens: newOutputTokens,
+          estimatedCost: calculateCost(newInputTokens, newOutputTokens),
+        };
+      });
 
       const newNode: ChatNode = {
         id: uuidv4(),
@@ -88,7 +109,7 @@ const App: React.FC = () => {
       setActiveNodeId(newNode.id);
     } catch (error) {
       console.error("Failed to generate response:", error);
-      alert("Error generating response. Please check your API key.");
+      alert(`Error: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setIsLoading(false);
     }
@@ -123,6 +144,10 @@ const App: React.FC = () => {
   const handleBranch = (parentId: string) => {
     setActiveNodeId(parentId);
     setViewMode(ViewMode.LINEAR);
+  };
+
+  const handleResetStats = () => {
+    setApiStats({ totalCalls: 0, inputTokens: 0, outputTokens: 0, estimatedCost: 0 });
   };
 
   return (
@@ -233,6 +258,9 @@ const App: React.FC = () => {
             </p>
           </div>
         </div>
+
+        {/* API Stats Panel */}
+        <ApiStatsPanel stats={apiStats} onReset={handleResetStats} />
       </div>
     </div>
   );
