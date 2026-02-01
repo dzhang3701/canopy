@@ -1,5 +1,5 @@
 {
-  "name": "arbor:-graph-based-llm-chat",
+  "name": "canopy-branching-conversations",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,15 +9,23 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react-dom": "^19.2.4",
-    "uuid": "^13.0.0",
     "@google/genai": "^1.39.0",
     "d3": "^7.9.0",
+    "katex": "^0.16.28",
+    "lucide-react": "^0.563.0",
     "react": "^19.2.4",
-    "lucide-react": "^0.563.0"
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "react-resizable-panels": "^4.5.7",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
+    "@types/react": "^19.2.10",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
