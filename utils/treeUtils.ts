@@ -21,17 +21,17 @@ export function getAncestorPath(allNodes: ChatNode[], leafNodeId: string): ChatN
 /**
  * Transforms flat nodes into a hierarchical tree structure for D3.
  */
-export function buildHierarchy(allNodes: ChatNode[], projectId: string): TreeDataNode | null {
-  const projectNodes = allNodes.filter(n => n.projectId === projectId && !n.isArchived);
+export function buildHierarchy(allNodes: ChatNode[], projectId: string, showArchived: boolean = false): TreeDataNode | null {
+  const projectNodes = allNodes.filter(n => n.projectId === projectId && (showArchived || !n.isArchived));
   const rootNode = projectNodes.find(n => n.parentId === null);
-  
+
   if (!rootNode) return null;
 
   const build = (node: ChatNode): TreeDataNode => {
     const children = projectNodes
       .filter(n => n.parentId === node.id)
       .map(build);
-    
+
     return {
       id: node.id,
       name: node.summary,
