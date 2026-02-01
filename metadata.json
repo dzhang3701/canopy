@@ -1,0 +1,6 @@
+
+{
+  "name": "Arbor: Graph-Based LLM Chat",
+  "description": "A version-controlled thinking process for LLMs. Toggle between traditional linear chat and a git-style branching tree view to manage complex conversations and exploration paths.",
+  "requestFramePermissions": []
+}
