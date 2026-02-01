@@ -5,12 +5,54 @@ import { ChatNode, TreeDataNode, Project } from '../types';
 import { buildHierarchy, getChildCount } from '../utils/treeUtils';
 import { Plus, X, TreePine } from 'lucide-react';
 
+// Helper function to wrap text into multiple lines
+function wrapText(text: string, maxChars: number, maxLines: number): string[] {
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    if (lines.length >= maxLines) break;
+    
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    if (testLine.length <= maxChars) {
+      currentLine = testLine;
+    } else {
+      if (currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        // Word is longer than maxChars, truncate it
+        lines.push(word.substring(0, maxChars - 3) + '...');
+        currentLine = '';
+      }
+    }
+  }
+
+  if (currentLine && lines.length < maxLines) {
+    lines.push(currentLine);
+  }
+
+  // Add ellipsis to last line if text was truncated
+  if (lines.length === maxLines && words.length > lines.join(' ').split(' ').length) {
+    const lastLine = lines[maxLines - 1];
+    if (lastLine.length > maxChars - 3) {
+      lines[maxLines - 1] = lastLine.substring(0, maxChars - 3) + '...';
+    } else {
+      lines[maxLines - 1] = lastLine + '...';
+    }
+  }
+
+  return lines;
+}
+
 interface GraphViewProps {
   nodes: ChatNode[];
   projects: Project[];
   activeProjectId: string;
   activeNodeId: string | null;
   contextNodeIds: Set<string>;
+  activePathIds: Set<string>;
   onNodeClick: (id: string) => void;
   onToggleContext: (id: string) => void;
   onSelectProject: (id: string) => void;
@@ -30,6 +72,7 @@ const GraphView: React.FC<GraphViewProps> = ({
   activeProjectId,
   activeNodeId,
   contextNodeIds,
+  activePathIds,
   onNodeClick,
   onToggleContext,
   onSelectProject,
@@ -62,8 +105,8 @@ const GraphView: React.FC<GraphViewProps> = ({
     svg.call(zoom);
 
     const treeLayout = d3.tree<TreeDataNode>()
-      .nodeSize([220, 160])
-      .separation((a, b) => a.parent === b.parent ? 1.3 : 1.6);
+      .nodeSize([280, 220])
+      .separation((a, b) => a.parent === b.parent ? 1.4 : 1.8);
 
     const root = d3.hierarchy(treeData);
     const tree = treeLayout(root);
@@ -95,7 +138,9 @@ const GraphView: React.FC<GraphViewProps> = ({
         }
       })
       .on("mouseenter", function(event, d) {
-        const isInContext = contextNodeIds.has(d.data.id);
+        const isManualContext = contextNodeIds.has(d.data.id);
+        const isInActivePath = activePathIds.has(d.data.id);
+        const isInContext = isManualContext || isInActivePath;
         if (!isInContext) {
           const rect = containerRef.current?.getBoundingClientRect();
           if (rect) {
@@ -114,60 +159,127 @@ const GraphView: React.FC<GraphViewProps> = ({
     // Determine node appearance based on context
     node.each(function(d) {
       const el = d3.select(this);
-      const isInContext = contextNodeIds.has(d.data.id);
+      const isManualContext = contextNodeIds.has(d.data.id);
+      const isInActivePath = activePathIds.has(d.data.id);
+      const isInContext = isManualContext || isInActivePath;
       const isActive = d.data.id === activeNodeId;
       const children = getChildCount(nodes, d.data.id);
 
       if (isInContext) {
-        // Large card for context nodes (Nodini style)
+        // Large expanded card for context nodes (like the screenshot)
+        const cardWidth = 220;
+        const cardHeight = 140;
+
+        // Main card background
         el.append("rect")
-          .attr("x", -90)
-          .attr("y", -45)
-          .attr("width", 180)
-          .attr("height", 90)
+          .attr("x", -cardWidth / 2)
+          .attr("y", -cardHeight / 2)
+          .attr("width", cardWidth)
+          .attr("height", cardHeight)
           .attr("rx", 12)
           .attr("fill", "white")
-          .attr("stroke", isActive ? "#16a34a" : "#4ade80")
-          .attr("stroke-width", isActive ? 3 : 2)
-          .style("filter", "drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1))");
+          .attr("stroke", isActive ? "#16a34a" : "#86efac")
+          .attr("stroke-width", isActive ? 3 : 1.5)
+          .style("filter", "drop-shadow(0 4px 12px rgba(0, 0, 0, 0.08))");
 
-        // Context indicator dot
-        el.append("circle")
-          .attr("cx", 75)
-          .attr("cy", -35)
-          .attr("r", 8)
-          .attr("fill", "#22c55e");
+        // Top connector line (dashed)
+        el.append("line")
+          .attr("x1", 0)
+          .attr("y1", -cardHeight / 2 - 15)
+          .attr("x2", 0)
+          .attr("y2", -cardHeight / 2)
+          .attr("stroke", "#86efac")
+          .attr("stroke-width", 2)
+          .attr("stroke-dasharray", "4,4");
 
-        // Summary label
+        // Title row with icon and star
+        el.append("rect")
+          .attr("x", -cardWidth / 2 + 12)
+          .attr("y", -cardHeight / 2 + 12)
+          .attr("width", 20)
+          .attr("height", 20)
+          .attr("rx", 4)
+          .attr("fill", "#dcfce7");
+
         el.append("text")
-          .attr("y", -15)
+          .attr("x", -cardWidth / 2 + 22)
+          .attr("y", -cardHeight / 2 + 26)
           .attr("text-anchor", "middle")
-          .attr("fill", "#166534")
+          .attr("fill", "#22c55e")
           .style("font-size", "12px")
+          .text("💬");
+
+        // Title text
+        el.append("text")
+          .attr("x", -cardWidth / 2 + 40)
+          .attr("y", -cardHeight / 2 + 27)
+          .attr("fill", "#166534")
+          .style("font-size", "13px")
           .style("font-weight", "600")
           .text(() => {
             const text = d.data.name;
-            return text.length > 18 ? text.substring(0, 15) + "..." : text;
+            return text.length > 20 ? text.substring(0, 17) + "..." : text;
           });
 
-        // User prompt preview
+        // Star indicator for active context
         el.append("text")
-          .attr("y", 5)
+          .attr("x", cardWidth / 2 - 20)
+          .attr("y", -cardHeight / 2 + 27)
           .attr("text-anchor", "middle")
-          .attr("fill", "#4ade80")
+          .attr("fill", "#fbbf24")
+          .style("font-size", "14px")
+          .text("★");
+
+        // Question section
+        el.append("text")
+          .attr("x", -cardWidth / 2 + 12)
+          .attr("y", -cardHeight / 2 + 50)
+          .attr("fill", "#6b7280")
           .style("font-size", "10px")
-          .text(() => {
-            const text = d.data.data.userPrompt;
-            return text.length > 25 ? text.substring(0, 22) + "..." : text;
-          });
+          .style("font-weight", "500")
+          .text("Question");
 
-        // Timestamp
+        // Question content (multi-line)
+        const questionText = d.data.data.userPrompt;
+        const questionLines = wrapText(questionText, 32, 2);
+        questionLines.forEach((line, i) => {
+          el.append("text")
+            .attr("x", -cardWidth / 2 + 12)
+            .attr("y", -cardHeight / 2 + 64 + (i * 12))
+            .attr("fill", "#1f2937")
+            .style("font-size", "11px")
+            .text(line);
+        });
+
+        // Divider line
+        el.append("line")
+          .attr("x1", -cardWidth / 2 + 12)
+          .attr("y1", -cardHeight / 2 + 90)
+          .attr("x2", cardWidth / 2 - 12)
+          .attr("y2", -cardHeight / 2 + 90)
+          .attr("stroke", "#e5e7eb")
+          .attr("stroke-width", 1);
+
+        // Answer section
         el.append("text")
-          .attr("y", 25)
-          .attr("text-anchor", "middle")
-          .attr("fill", "#86efac")
-          .style("font-size", "9px")
-          .text(() => new Date(d.data.data.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+          .attr("x", -cardWidth / 2 + 12)
+          .attr("y", -cardHeight / 2 + 105)
+          .attr("fill", "#6b7280")
+          .style("font-size", "10px")
+          .style("font-weight", "500")
+          .text("Answer");
+
+        // Answer content (multi-line)
+        const answerText = d.data.data.assistantResponse;
+        const answerLines = wrapText(answerText, 32, 2);
+        answerLines.forEach((line, i) => {
+          el.append("text")
+            .attr("x", -cardWidth / 2 + 12)
+            .attr("y", -cardHeight / 2 + 119 + (i * 12))
+            .attr("fill", "#1f2937")
+            .style("font-size", "11px")
+            .text(line);
+        });
 
       } else {
         // Small faded dot for non-context nodes
@@ -208,7 +320,7 @@ const GraphView: React.FC<GraphViewProps> = ({
 
     svg.call(zoom.transform, initialTransform);
 
-  }, [treeData, nodes, activeNodeId, contextNodeIds, onNodeClick, onToggleContext]);
+  }, [treeData, nodes, activeNodeId, contextNodeIds, activePathIds, onNodeClick, onToggleContext]);
 
   return (
     <div className="h-full flex flex-col bg-green-50">
