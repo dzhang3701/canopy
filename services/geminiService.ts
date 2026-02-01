@@ -21,23 +21,76 @@ function getClient(): GoogleGenAI {
 }
 
 /**
- * Generates a response from the model based on the node hierarchy.
+ * Streams a response from the model based on the node hierarchy.
+ */
+export async function streamChatResponse(
+  history: ChatNode[],
+  newPrompt: string,
+  onChunk: (chunk: string) => void
+): Promise<void> {
+  const contents = history.map(node => [
+    { role: 'user' as const, parts: [{ text: node.userPrompt }] },
+    { role: 'model' as const, parts: [{ text: node.assistantResponse }] }
+  ]).flat();
+
+  contents.push({ role: 'user' as const, parts: [{ text: newPrompt }] });
+
+  const response = await getClient().models.generateContentStream({
+    model: 'gemini-2.5-flash',
+    contents: contents,
+    config: {
+      temperature: 0.7,
+      topP: 0.95,
+      topK: 64,
+    }
+  });
+
+  for await (const chunk of response) {
+    const text = chunk.text;
+    if (text) {
+      onChunk(text);
+    }
+  }
+}
+
+/**
+ * Generates a response (or just summary) from the model.
  */
 export async function generateChatResponse(
   history: ChatNode[],
-  newPrompt: string
+  newPrompt: string,
+  summaryOnly: boolean = false
 ): Promise<{ response: string; summary: string }> {
-  // Construct the prompt with full context from ancestors
+  if (summaryOnly) {
+    // Just generate the summary
+    const summaryResponse = await getClient().models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        {
+          role: 'user',
+          parts: [{
+            text: `Summarize the following user question in exactly one concise phrase (max 5 words), capturing the main topic:
+            "${newPrompt}"`
+          }]
+        }
+      ]
+    });
+
+    const summary = summaryResponse.text?.trim().replace(/^["']|["']$/g, '') || "Untitled Exchange";
+    return { response: '', summary };
+  }
+
+  // Full response generation (non-streaming fallback)
   const contents = history.map(node => [
-    { text: node.userPrompt },
-    { text: node.assistantResponse }
+    { role: 'user' as const, parts: [{ text: node.userPrompt }] },
+    { role: 'model' as const, parts: [{ text: node.assistantResponse }] }
   ]).flat();
 
-  contents.push({ text: newPrompt });
+  contents.push({ role: 'user' as const, parts: [{ text: newPrompt }] });
 
   const response = await getClient().models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: contents.map(c => ({ parts: [c] })),
+    model: 'gemini-2.5-flash',
+    contents: contents,
     config: {
       temperature: 0.7,
       topP: 0.95,
@@ -49,14 +102,15 @@ export async function generateChatResponse(
 
   // Generate a one-line summary
   const summaryResponse = await getClient().models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-2.5-flash',
     contents: [
-      { 
-        parts: [{ 
+      {
+        role: 'user',
+        parts: [{
           text: `Summarize the following interaction in exactly one concise phrase (max 5 words):
           User: ${newPrompt}
-          Assistant: ${assistantText}` 
-        }] 
+          Assistant: ${assistantText}`
+        }]
       }
     ]
   });

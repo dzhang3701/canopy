@@ -3,10 +3,9 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { ChatNode, Project } from './types';
-import Sidebar from './components/Sidebar';
 import ChatView from './components/ChatView';
 import GraphView from './components/GraphView';
-import { generateChatResponse } from './services/geminiService';
+import { generateChatResponse, streamChatResponse } from './services/geminiService';
 import { getAncestorPath } from './utils/treeUtils';
 import { Send, Loader2, Sparkles, GripVertical } from 'lucide-react';
 
@@ -42,6 +41,7 @@ const App: React.FC = () => {
 
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [streamingResponse, setStreamingResponse] = useState('');
 
   // Persistence
   useEffect(() => {
@@ -69,7 +69,6 @@ const App: React.FC = () => {
     return getAncestorPath(nodes, activeNodeId);
   }, [nodes, activeNodeId]);
 
-  // Context path includes all ancestors of context nodes
   const contextPath = useMemo(() => {
     if (contextNodeIds.size === 0) return activePath;
 
@@ -102,10 +101,19 @@ const App: React.FC = () => {
     const promptText = input;
     setInput('');
     setIsLoading(true);
+    setStreamingResponse('');
 
     try {
       const history = contextPath.length > 0 ? contextPath : activePath;
-      const { response, summary } = await generateChatResponse(history, promptText);
+
+      let fullResponse = '';
+      await streamChatResponse(history, promptText, (chunk) => {
+        fullResponse += chunk;
+        setStreamingResponse(fullResponse);
+      });
+
+      // Generate summary after streaming completes
+      const { summary } = await generateChatResponse(history, promptText, true);
 
       const newNode: ChatNode = {
         id: uuidv4(),
@@ -113,7 +121,7 @@ const App: React.FC = () => {
         projectId: activeProjectId,
         summary: summary,
         userPrompt: promptText,
-        assistantResponse: response,
+        assistantResponse: fullResponse,
         timestamp: Date.now(),
         isArchived: false,
         isCollapsed: false
@@ -121,6 +129,7 @@ const App: React.FC = () => {
 
       setNodes(prev => [...prev, newNode]);
       setActiveNodeId(newNode.id);
+      setStreamingResponse('');
     } catch (error) {
       console.error("Failed to generate response:", error);
       alert("Error generating response. Please check your API key.");
@@ -157,6 +166,18 @@ const App: React.FC = () => {
     }
   };
 
+  const handleSelectProject = (id: string) => {
+    setActiveProjectId(id);
+    const projectNodes = nodes.filter(n => n.projectId === id);
+    if (projectNodes.length > 0) {
+      const latest = [...projectNodes].sort((a, b) => b.timestamp - a.timestamp)[0];
+      setActiveNodeId(latest.id);
+    } else {
+      setActiveNodeId(null);
+    }
+    setContextNodeIds(new Set());
+  };
+
   const handleBranch = (parentId: string) => {
     setActiveNodeId(parentId);
   };
@@ -167,105 +188,75 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen w-full bg-green-50 overflow-hidden font-sans">
-      <Sidebar
-        projects={projects}
-        activeProjectId={activeProjectId}
-        onSelectProject={(id) => {
-          setActiveProjectId(id);
-          const projectNodes = nodes.filter(n => n.projectId === id);
-          if (projectNodes.length > 0) {
-            const latest = [...projectNodes].sort((a, b) => b.timestamp - a.timestamp)[0];
-            setActiveNodeId(latest.id);
-          } else {
-            setActiveNodeId(null);
-          }
-          setContextNodeIds(new Set());
-        }}
-        onCreateProject={handleCreateProject}
-        onDeleteProject={handleDeleteProject}
-      />
+      <PanelGroup direction="horizontal" className="flex-1">
+        {/* Graph Panel with Project Tabs */}
+        <Panel defaultSize={50} minSize={30}>
+          <GraphView
+            nodes={nodes}
+            projects={projects}
+            activeProjectId={activeProjectId || ''}
+            activeNodeId={activeNodeId}
+            contextNodeIds={contextNodeIds}
+            onNodeClick={handleNodeClick}
+            onToggleContext={handleToggleContext}
+            onSelectProject={handleSelectProject}
+            onCreateProject={handleCreateProject}
+            onDeleteProject={handleDeleteProject}
+          />
+        </Panel>
 
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-        {/* Header */}
-        <header className="h-14 border-b border-green-200 flex items-center justify-between px-6 bg-white/80 backdrop-blur-md z-10">
-          <div className="flex items-center gap-3">
-            <span className="text-xl">{projects.find(p => p.id === activeProjectId)?.icon || '📁'}</span>
-            <h2 className="font-bold text-green-800">
-              {projects.find(p => p.id === activeProjectId)?.name || 'Select Project'}
-            </h2>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-green-600 font-mono">
-            <Sparkles className="w-3 h-3 text-green-500" />
-            {contextNodeIds.size > 0
-              ? `${contextNodeIds.size} nodes in context`
-              : `${activePath.length} turns active`
-            }
-          </div>
-        </header>
+        {/* Resize Handle */}
+        <PanelResizeHandle className="w-2 bg-green-100 hover:bg-green-200 transition-colors flex items-center justify-center group">
+          <GripVertical className="w-3 h-3 text-green-400 group-hover:text-green-600" />
+        </PanelResizeHandle>
 
-        {/* Main Content - Resizable Panels */}
-        <main className="flex-1 overflow-hidden flex flex-col">
-          <PanelGroup direction="horizontal" className="flex-1">
-            {/* Graph Panel */}
-            <Panel defaultSize={50} minSize={30}>
-              <GraphView
-                nodes={nodes}
-                activeProjectId={activeProjectId || ''}
-                activeNodeId={activeNodeId}
-                contextNodeIds={contextNodeIds}
-                onNodeClick={handleNodeClick}
-                onToggleContext={handleToggleContext}
-              />
-            </Panel>
-
-            {/* Resize Handle */}
-            <PanelResizeHandle className="w-2 bg-green-100 hover:bg-green-200 transition-colors flex items-center justify-center group">
-              <GripVertical className="w-3 h-3 text-green-400 group-hover:text-green-600" />
-            </PanelResizeHandle>
-
-            {/* Chat Panel */}
-            <Panel defaultSize={50} minSize={30}>
-              <ChatView
-                activePath={activePath}
-                allNodes={nodes}
-                contextNodeIds={contextNodeIds}
-                onNodeClick={handleNodeClick}
-                onBranch={handleBranch}
-                onToggleContext={handleToggleContext}
-              />
-            </Panel>
-          </PanelGroup>
-        </main>
-
-        {/* Input Area (Sticky) */}
-        <div className="p-4 bg-white border-t border-green-200">
-          <form
-            onSubmit={handleSendMessage}
-            className="max-w-4xl mx-auto relative group"
-          >
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={activeProjectId ? "Type a message or click 'Branch' on a previous message..." : "Select a project to start..."}
-              disabled={!activeProjectId || isLoading}
-              className="w-full bg-green-50 border border-green-300 rounded-xl py-4 pl-6 pr-14 text-green-800 placeholder:text-green-400 focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500/50 transition-all disabled:opacity-50"
+        {/* Chat Panel */}
+        <Panel defaultSize={50} minSize={30}>
+          <div className="h-full flex flex-col">
+            <ChatView
+              activePath={activePath}
+              allNodes={nodes}
+              contextNodeIds={contextNodeIds}
+              onNodeClick={handleNodeClick}
+              onBranch={handleBranch}
+              onToggleContext={handleToggleContext}
+              streamingResponse={streamingResponse}
+              isLoading={isLoading}
             />
-            <button
-              type="submit"
-              disabled={!input.trim() || isLoading || !activeProjectId}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-lg bg-green-600 text-white hover:bg-green-500 transition-colors disabled:opacity-50 disabled:hover:bg-green-600"
-            >
-              {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-            </button>
-          </form>
-          <div className="max-w-4xl mx-auto mt-2 flex justify-center">
-            <p className="text-[10px] text-green-500 font-mono">
-              Canopy tracks your divergent thoughts. Shift+click nodes to add to context.
-            </p>
+
+            {/* Input Area */}
+            <div className="p-4 bg-white border-t border-green-200">
+              <form
+                onSubmit={handleSendMessage}
+                className="relative"
+              >
+                <div className="flex items-center gap-2 text-[10px] text-green-500 mb-2 font-mono">
+                  <Sparkles className="w-3 h-3" />
+                  {contextNodeIds.size > 0
+                    ? `${contextNodeIds.size} nodes in context`
+                    : `${activePath.length} turns active`
+                  }
+                </div>
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder={activeProjectId ? "Type a message..." : "Select a project to start..."}
+                  disabled={!activeProjectId || isLoading}
+                  className="w-full bg-green-50 border border-green-300 rounded-xl py-3 pl-4 pr-12 text-green-800 placeholder:text-green-400 focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500/50 transition-all disabled:opacity-50"
+                />
+                <button
+                  type="submit"
+                  disabled={!input.trim() || isLoading || !activeProjectId}
+                  className="absolute right-2 top-[calc(50%+10px)] -translate-y-1/2 p-2 rounded-lg bg-green-600 text-white hover:bg-green-500 transition-colors disabled:opacity-50 disabled:hover:bg-green-600"
+                >
+                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                </button>
+              </form>
+            </div>
           </div>
-        </div>
-      </div>
+        </Panel>
+      </PanelGroup>
     </div>
   );
 };
