@@ -197,6 +197,7 @@ const App: React.FC = () => {
             activeProjectId={activeProjectId || ''}
             activeNodeId={activeNodeId}
             contextNodeIds={contextNodeIds}
+            activePathIds={new Set(activePath.map(n => n.id))}
             onNodeClick={handleNodeClick}
             onToggleContext={handleToggleContext}
             onSelectProject={handleSelectProject}
