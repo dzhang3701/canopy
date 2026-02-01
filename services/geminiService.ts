@@ -1,8 +1,24 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { ChatNode } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+
+// Debug: log if API key is present (not the actual key)
+console.log('API Key loaded:', API_KEY ? `Yes (${API_KEY.length} chars)` : 'No');
+
+// Lazy initialization to prevent crash when API key is not set
+let ai: GoogleGenAI | null = null;
+
+function getClient(): GoogleGenAI {
+  if (!API_KEY) {
+    throw new Error("GEMINI_API_KEY is not set. Please create a .env file with your API key.");
+  }
+  if (!ai) {
+    ai = new GoogleGenAI({ apiKey: API_KEY });
+  }
+  return ai;
+}
 
 /**
  * Generates a response from the model based on the node hierarchy.
@@ -19,7 +35,7 @@ export async function generateChatResponse(
 
   contents.push({ text: newPrompt });
 
-  const response = await ai.models.generateContent({
+  const response = await getClient().models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: contents.map(c => ({ parts: [c] })),
     config: {
@@ -32,7 +48,7 @@ export async function generateChatResponse(
   const assistantText = response.text || "I'm sorry, I couldn't generate a response.";
 
   // Generate a one-line summary
-  const summaryResponse = await ai.models.generateContent({
+  const summaryResponse = await getClient().models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: [
       { 
