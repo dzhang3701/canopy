@@ -53,9 +53,6 @@ export async function streamChatResponse(
   }
 }
 
-/**
- * Generates a response (or just summary) from the model.
- */
 export async function generateChatResponse(
   history: ChatNode[],
   newPrompt: string,

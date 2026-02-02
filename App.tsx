@@ -99,6 +99,7 @@ const App: React.FC = () => {
     if (!input.trim() || !activeProjectId || isLoading) return;
 
     const promptText = input;
+    const newNodeId = uuidv4();
     setInput('');
     setIsLoading(true);
     setStreamingResponse('');
@@ -115,11 +116,12 @@ const App: React.FC = () => {
       // Generate summary after streaming completes
       const { summary } = await generateChatResponse(history, promptText, true);
 
+      // Create node immediately with empty response
       const newNode: ChatNode = {
-        id: uuidv4(),
+        id: newNodeId,
         parentId: activeNodeId,
         projectId: activeProjectId,
-        summary: summary,
+        summary: 'Generating...',
         userPrompt: promptText,
         assistantResponse: fullResponse,
         timestamp: Date.now(),
@@ -132,6 +134,8 @@ const App: React.FC = () => {
       setStreamingResponse('');
     } catch (error) {
       console.error("Failed to generate response:", error);
+      setNodes(prev => prev.filter(n => n.id !== newNodeId));
+      setActiveNodeId(activeNodeId);
       alert("Error generating response. Please check your API key.");
     } finally {
       setIsLoading(false);
