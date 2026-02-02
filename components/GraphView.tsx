@@ -453,14 +453,14 @@ const GraphView: React.FC<GraphViewProps> = ({
             .attr("transform", `translate(${cardWidth / 2 - 44}, ${-cardHeight / 2 + 12})`);
 
           if (showArchived) {
-            // Unarchive button (when viewing archived nodes)
+            // Unarchive button (when viewing archived nodes) - green
             actionsGroup.append("rect")
               .attr("x", 0)
               .attr("y", 0)
               .attr("width", 18)
               .attr("height", 18)
               .attr("rx", 4)
-              .attr("fill", "#d1fae5")
+              .attr("fill", "#22c55e")
               .attr("class", "unarchive-btn")
               .style("cursor", "pointer")
               .on("click", (event) => {
@@ -468,29 +468,30 @@ const GraphView: React.FC<GraphViewProps> = ({
                 onUnarchiveNode(d.data.id);
               })
               .on("mouseenter", function() {
-                d3.select(this).attr("fill", "#a7f3d0");
+                d3.select(this).attr("fill", "#16a34a");
               })
               .on("mouseleave", function() {
-                d3.select(this).attr("fill", "#d1fae5");
+                d3.select(this).attr("fill", "#22c55e");
               });
 
             actionsGroup.append("text")
               .attr("x", 9)
-              .attr("y", 13)
+              .attr("y", 14)
               .attr("text-anchor", "middle")
-              .attr("fill", "#059669")
-              .style("font-size", "10px")
+              .attr("fill", "white")
+              .style("font-size", "12px")
+              .style("font-weight", "bold")
               .style("pointer-events", "none")
               .text("↩");
           } else {
-            // Archive button (when viewing active nodes)
+            // Archive button (when viewing active nodes) - yellow
             actionsGroup.append("rect")
               .attr("x", 0)
               .attr("y", 0)
               .attr("width", 18)
               .attr("height", 18)
               .attr("rx", 4)
-              .attr("fill", "#fef3c7")
+              .attr("fill", "#facc15")
               .attr("class", "archive-btn")
               .style("cursor", "pointer")
               .on("click", (event) => {
@@ -498,30 +499,31 @@ const GraphView: React.FC<GraphViewProps> = ({
                 onArchiveNode(d.data.id);
               })
               .on("mouseenter", function() {
-                d3.select(this).attr("fill", "#fde68a");
+                d3.select(this).attr("fill", "#eab308");
               })
               .on("mouseleave", function() {
-                d3.select(this).attr("fill", "#fef3c7");
+                d3.select(this).attr("fill", "#facc15");
               });
 
             actionsGroup.append("text")
               .attr("x", 9)
-              .attr("y", 13)
+              .attr("y", 14)
               .attr("text-anchor", "middle")
-              .attr("fill", "#d97706")
-              .style("font-size", "10px")
+              .attr("fill", "#713f12")
+              .style("font-size", "12px")
+              .style("font-weight", "bold")
               .style("pointer-events", "none")
-              .text("📦");
+              .text("A");
           }
 
-          // Delete button (always shown)
+          // Delete button (always shown) - red
           actionsGroup.append("rect")
             .attr("x", 22)
             .attr("y", 0)
             .attr("width", 18)
             .attr("height", 18)
             .attr("rx", 4)
-            .attr("fill", "#fee2e2")
+            .attr("fill", "#ef4444")
             .attr("class", "delete-btn")
             .style("cursor", "pointer")
             .on("click", (event) => {
@@ -529,20 +531,21 @@ const GraphView: React.FC<GraphViewProps> = ({
               onDeleteNode(d.data.id);
             })
             .on("mouseenter", function() {
-              d3.select(this).attr("fill", "#fecaca");
+              d3.select(this).attr("fill", "#dc2626");
             })
             .on("mouseleave", function() {
-              d3.select(this).attr("fill", "#fee2e2");
+              d3.select(this).attr("fill", "#ef4444");
             });
 
           actionsGroup.append("text")
             .attr("x", 31)
-            .attr("y", 13)
+            .attr("y", 14)
             .attr("text-anchor", "middle")
-            .attr("fill", "#dc2626")
-            .style("font-size", "10px")
+            .attr("fill", "white")
+            .style("font-size", "12px")
+            .style("font-weight", "bold")
             .style("pointer-events", "none")
-            .text("🗑");
+            .text("×");
         }
 
         // Question section
@@ -841,7 +844,7 @@ const GraphView: React.FC<GraphViewProps> = ({
         {/* Node Actions Context Menu (for right-click on condensed nodes) */}
         {nodeActions && (
           <div
-            className="absolute z-50 bg-white border border-green-200 rounded-lg shadow-xl p-1 min-w-[140px]"
+            className="absolute z-50 bg-white rounded-lg shadow-lg overflow-hidden min-w-[120px]"
             style={{
               left: nodeActions.x,
               top: nodeActions.y,
@@ -849,19 +852,16 @@ const GraphView: React.FC<GraphViewProps> = ({
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-2 py-1 text-xs font-medium text-green-700 border-b border-green-100 mb-1 truncate">
-              {nodeActions.nodeSummary}
-            </div>
             {showArchived ? (
               <button
                 onClick={() => {
                   onUnarchiveNode(nodeActions.nodeId);
                   setNodeActions(null);
                 }}
-                className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-green-700 hover:bg-green-50 rounded transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm bg-green-500 text-white hover:bg-green-600 transition-colors"
               >
-                <ArchiveRestore className="w-3 h-3" />
-                Unarchive
+                <ArchiveRestore className="w-4 h-4" />
+                Restore
               </button>
             ) : (
               <button
@@ -869,9 +869,9 @@ const GraphView: React.FC<GraphViewProps> = ({
                   onArchiveNode(nodeActions.nodeId);
                   setNodeActions(null);
                 }}
-                className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-amber-700 hover:bg-amber-50 rounded transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm bg-yellow-400 text-yellow-900 hover:bg-yellow-500 transition-colors"
               >
-                <Archive className="w-3 h-3" />
+                <Archive className="w-4 h-4" />
                 Archive
               </button>
             )}
@@ -880,9 +880,9 @@ const GraphView: React.FC<GraphViewProps> = ({
                 onDeleteNode(nodeActions.nodeId);
                 setNodeActions(null);
               }}
-              className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm bg-red-500 text-white hover:bg-red-600 transition-colors"
             >
-              <Trash2 className="w-3 h-3" />
+              <Trash2 className="w-4 h-4" />
               Delete
             </button>
           </div>
