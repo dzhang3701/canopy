@@ -187,13 +187,13 @@ const App: React.FC = () => {
   }, [nodes, activeNodeId]);
 
   const contextPath = useMemo(() => {
-    if (contextNodeIds.size === 0) return activePath;
-
     const allContextNodes = new Set<string>();
-    contextNodeIds.forEach(nodeId => {
-      const ancestors = getAncestorPath(nodes, nodeId);
-      ancestors.forEach(node => allContextNodes.add(node.id));
-    });
+
+    // Always include the active path (current node to root)
+    activePath.forEach(node => allContextNodes.add(node.id));
+
+    // Add only the specific manually selected nodes (not their ancestors)
+    contextNodeIds.forEach(nodeId => allContextNodes.add(nodeId));
 
     return nodes.filter(n => allContextNodes.has(n.id))
       .sort((a, b) => a.timestamp - b.timestamp);
