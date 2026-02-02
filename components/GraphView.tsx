@@ -112,13 +112,24 @@ const GraphView: React.FC<GraphViewProps> = ({
   }, [containerSize]);
 
   useEffect(() => {
-    if (focusNodeId && sidebarExpanded) {
+    const targetId = focusNodeId || activeNodeId;
+    if (targetId && sidebarExpanded) {
       const timer = setTimeout(() => {
-        focusOnNode(focusNodeId);
+        focusOnNode(targetId);
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [focusNodeId, focusOnNode, sidebarExpanded]);
+  }, [focusNodeId, activeNodeId, focusOnNode, sidebarExpanded]);
+
+  // Sidebar list auto-scroll
+  useEffect(() => {
+    if (!sidebarExpanded && activeNodeId) {
+      const element = document.getElementById(`node-list-item-${activeNodeId}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }, [activeNodeId, sidebarExpanded]);
 
   // Close context menu on click outside
   useEffect(() => {
@@ -457,6 +468,7 @@ const GraphView: React.FC<GraphViewProps> = ({
     return (
       <div key={node.id}>
         <button
+          id={`node-list-item-${node.id}`}
           onClick={(e) => {
             if (node.isArchived) {
               onUnarchiveNode(node.id);
