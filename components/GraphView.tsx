@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react'
 import * as d3 from 'd3';
 import { ChatNode, TreeDataNode, Project } from '../types';
 import { buildHierarchy, getAncestorPath } from '../utils/treeUtils';
-import { TreePalm, Moon, Sun, List, Network, Archive, Trash2, RotateCcw, Plus, X } from 'lucide-react';
+import { TreePalm, Moon, Sun, List, Network, Archive, Trash2, RotateCcw, Plus, X, Settings, Pencil } from 'lucide-react';
 
 interface GraphViewProps {
   nodes: ChatNode[];
@@ -22,13 +22,14 @@ interface GraphViewProps {
   onNodeClick: (id: string) => void;
   onToggleContext: (id: string) => void;
   onSelectProject: (id: string) => void;
-  onCreateProject: () => void;
+  onCreateProject: (name: string) => void;
   onDeleteProject: (id: string) => void;
-  onRenameProject: (id: string) => void;
-  onRenameNode: (id: string) => void;
+  onRenameProject: (id: string, name: string) => void;
+  onRenameNode: (id: string, name: string) => void;
   onArchiveNode: (id: string) => void;
   onDeleteNode: (id: string) => void;
   onUnarchiveNode: (id: string) => void;
+  onOpenSettings: () => void;
 }
 
 interface TooltipState {
@@ -60,18 +61,18 @@ const GraphView: React.FC<GraphViewProps> = ({
   sidebarExpanded,
   showArchived,
   onToggleSidebar,
-  onToggleDarkMode,
   onToggleShowArchived,
   onNodeClick,
   onToggleContext,
-  onSelectProject,
-  onCreateProject,
-  onDeleteProject,
   onRenameProject,
   onRenameNode,
   onArchiveNode,
   onDeleteNode,
-  onUnarchiveNode
+  onUnarchiveNode,
+  onOpenSettings,
+  onSelectProject,
+  onCreateProject,
+  onDeleteProject
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -80,6 +81,13 @@ const GraphView: React.FC<GraphViewProps> = ({
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+
+  // In-line editing states
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [editValue, setEditValue] = useState("");
+  const editInputRef = useRef<HTMLInputElement>(null);
 
   const hasInitializedRef = useRef<boolean>(false);
   const prevProjectIdRef = useRef<string>(activeProjectId);
@@ -93,14 +101,8 @@ const GraphView: React.FC<GraphViewProps> = ({
     return nodes.filter(n => n.projectId === activeProjectId && n.isArchived).length;
   }, [nodes, activeProjectId]);
 
-  // Reset view when project changes
-  useEffect(() => {
-    if (prevProjectIdRef.current !== activeProjectId) {
-      currentTransformRef.current = null;
-      hasInitializedRef.current = false;
-      prevProjectIdRef.current = activeProjectId;
-    }
-  }, [activeProjectId]);
+  // Auto-centering state managed within the main rendering loop
+
 
   // Handle resize with ResizeObserver
   useEffect(() => {
@@ -117,6 +119,14 @@ const GraphView: React.FC<GraphViewProps> = ({
     resizeObserver.observe(containerRef.current);
     return () => resizeObserver.disconnect();
   }, []);
+
+  // Auto-focus edit input
+  useEffect(() => {
+    if ((editingProjectId || editingNodeId || isCreatingProject) && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editingProjectId, editingNodeId, isCreatingProject]);
 
   const focusOnNode = useCallback((nodeId: string) => {
     if (!svgRef.current || !zoomRef.current || !containerSize.width || !containerSize.height) return;
@@ -139,13 +149,24 @@ const GraphView: React.FC<GraphViewProps> = ({
   }, [containerSize]);
 
   useEffect(() => {
-    if (focusNodeId && sidebarExpanded) {
+    const targetId = focusNodeId || activeNodeId;
+    if (targetId && sidebarExpanded) {
       const timer = setTimeout(() => {
-        focusOnNode(focusNodeId);
+        focusOnNode(targetId);
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [focusNodeId, focusOnNode, sidebarExpanded]);
+  }, [focusNodeId, activeNodeId, focusOnNode, sidebarExpanded]);
+
+  // Sidebar list auto-scroll
+  useEffect(() => {
+    if (!sidebarExpanded && activeNodeId) {
+      const element = document.getElementById(`node-list-item-${activeNodeId}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }, [activeNodeId, sidebarExpanded]);
 
   // Close context menu on click outside
   useEffect(() => {
@@ -185,13 +206,19 @@ const GraphView: React.FC<GraphViewProps> = ({
 
   // D3 Graph rendering for expanded mode
   useEffect(() => {
-    if (!sidebarExpanded || !treeData || !svgRef.current || containerSize.width === 0) return;
+    if (!sidebarExpanded || !svgRef.current || containerSize.width === 0) return;
+
+    const svg = d3.select(svgRef.current);
+    svg.selectAll("*").remove();
+
+    if (!treeData) {
+      hasInitializedRef.current = false;
+      return;
+    }
 
     const width = containerSize.width;
     const height = containerSize.height;
 
-    const svg = d3.select(svgRef.current);
-    svg.selectAll("*").remove();
 
     const g = svg.append("g");
 
@@ -204,6 +231,34 @@ const GraphView: React.FC<GraphViewProps> = ({
 
     zoomRef.current = zoom;
     svg.call(zoom);
+
+    // Specialized mouse wheel controls: 
+    // - Cmd/Ctrl + Scroll: Zoom
+    // - Shift + Scroll: Pan Horizontal
+    // - Scroll: Pan Vertical
+    svg.on("wheel.zoom", null); // Disable default wheel zoom
+    svg.on("wheel", (event) => {
+      event.preventDefault();
+      const isZoom = event.metaKey || event.ctrlKey;
+      const isHorizontal = event.shiftKey;
+      const scale = currentTransformRef.current?.k || 1;
+
+      if (isZoom) {
+        // Cmd/Ctrl + Scroll: Zoom
+        const factor = Math.pow(2, -event.deltaY * 0.002);
+        svg.call(zoom.scaleBy, factor, d3.pointer(event));
+      } else if (isHorizontal) {
+        // Shift + Scroll: Pan Horizontal
+        // Browsers/OS often swap deltaY to deltaX when Shift is held.
+        // We handle both cases to ensure it works on all platforms.
+        const dx = event.deltaX !== 0 ? event.deltaX : event.deltaY;
+        svg.call(zoom.translateBy, -dx / scale, 0);
+      } else {
+        // Regular Scroll: Vertical Pan
+        // Also support native trackpad horizontal panning via deltaX
+        svg.call(zoom.translateBy, -event.deltaX / scale, -event.deltaY / scale);
+      }
+    }, { passive: false });
 
     const treeLayout = d3.tree<TreeDataNode>()
       .nodeSize([180, 100])
@@ -254,7 +309,7 @@ const GraphView: React.FC<GraphViewProps> = ({
         if (d.data.data.isArchived) {
           onUnarchiveNode(d.data.id);
         } else if (event.shiftKey) {
-          onRenameNode(d.data.id);
+          onToggleContext(d.data.id);
         } else if (event.ctrlKey || event.metaKey) {
           onToggleContext(d.data.id);
         } else {
@@ -485,74 +540,99 @@ const GraphView: React.FC<GraphViewProps> = ({
 
     return (
       <div key={node.id}>
-        <button
-          onClick={(e) => {
-            if (node.isArchived) {
-              onUnarchiveNode(node.id);
-            } else if (e.shiftKey) {
-              onRenameNode(node.id);
-            } else if (e.ctrlKey || e.metaKey) {
-              onToggleContext(node.id);
-            } else {
-              onNodeClick(node.id);
-            }
-          }}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setContextMenu({
-              x: e.clientX,
-              y: e.clientY,
-              nodeId: node.id,
-              isArchived: node.isArchived
-            });
-          }}
-          onMouseEnter={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            setTooltip({
-              x: rect.right,
-              y: rect.top + rect.height / 2,
-              content: {
-                userPrompt: node.userPrompt,
-                assistantResponse: node.assistantResponse,
-                timestamp: node.timestamp
+        {editingNodeId === node.id ? (
+          <div className="px-3 py-1.5">
+            <input
+              ref={editInputRef}
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={() => {
+                onRenameNode(node.id, editValue);
+                setEditingNodeId(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  onRenameNode(node.id, editValue);
+                  setEditingNodeId(null);
+                } else if (e.key === 'Escape') {
+                  setEditingNodeId(null);
+                }
+              }}
+              className={`w-full px-2 py-1 rounded-md text-[14px] outline-none ring-2 ring-canopy-500/50 ${isDarkMode ? 'bg-dark-800 text-white' : 'bg-white text-dark-900 shadow-sm'
+                }`}
+            />
+          </div>
+        ) : (
+          <button
+            id={`node-list-item-${node.id}`}
+            onClick={(e) => {
+              if (node.isArchived) {
+                onUnarchiveNode(node.id);
+              } else if (e.shiftKey) {
+                onToggleContext(node.id);
+              } else if (e.ctrlKey || e.metaKey) {
+                onToggleContext(node.id);
+              } else {
+                onNodeClick(node.id);
               }
-            });
-          }}
-          onMouseMove={() => { }}
-          onMouseLeave={() => setTooltip(null)}
-          className={`sidebar-item group w-full text-left px-3 py-1.5 rounded-md text-[14px] flex items-center justify-between gap-3 transition-all ${isActive
-            ? isDarkMode
-              ? 'bg-dark-800 text-canopy-400 border-l-2 border-canopy-500'
-              : 'bg-canopy-50 text-canopy-700 border-l-2 border-canopy-500'
-            : isDarkMode
-              ? 'text-dark-400 hover:bg-dark-800/50 hover:text-dark-300'
-              : 'text-dark-500 hover:bg-white/50 hover:text-dark-700'
-            }`}
-        >
-          <div className="flex items-center gap-1.5 overflow-hidden min-w-0">
-            <span className={`truncate font-medium ${node.isArchived ? 'opacity-50 italic' : ''}`}>
-              {node.summary || 'New conversation'}
-            </span>
-            {childCount > 1 && (
-              <span className={`text-[10px] px-1 rounded-sm flex-shrink-0 ${isDarkMode
-                ? 'bg-dark-700 text-dark-300'
-                : 'bg-white text-dark-400 border border-canopy-100'
-                }`}>
-                {childCount}
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setContextMenu({
+                x: e.clientX,
+                y: e.clientY,
+                nodeId: node.id,
+                isArchived: node.isArchived
+              });
+            }}
+            onMouseEnter={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              setTooltip({
+                x: rect.right,
+                y: rect.top + rect.height / 2,
+                content: {
+                  userPrompt: node.userPrompt,
+                  assistantResponse: node.assistantResponse,
+                  timestamp: node.timestamp
+                }
+              });
+            }}
+            onMouseMove={() => { }}
+            onMouseLeave={() => setTooltip(null)}
+            className={`sidebar-item group w-full text-left px-3 py-1.5 rounded-md text-[14px] flex items-center justify-between gap-3 transition-all ${isActive
+              ? isDarkMode
+                ? 'bg-dark-800 text-canopy-400 border-l-2 border-canopy-500'
+                : 'bg-canopy-50 text-canopy-700 border-l-2 border-canopy-500'
+              : isDarkMode
+                ? 'text-dark-400 hover:bg-dark-800/50 hover:text-dark-300'
+                : 'text-dark-500 hover:bg-white/50 hover:text-dark-700'
+              }`}
+          >
+            <div className="flex items-center gap-1.5 overflow-hidden min-w-0">
+              <span className={`truncate font-medium ${node.isArchived ? 'opacity-50 italic' : ''}`}>
+                {node.summary || 'New conversation'}
               </span>
-            )}
-          </div>
+              {childCount > 1 && (
+                <span className={`text-[10px] px-1 rounded-sm flex-shrink-0 ${isDarkMode
+                  ? 'bg-dark-700 text-dark-300'
+                  : 'bg-white text-dark-400 border border-canopy-100'
+                  }`}>
+                  {childCount}
+                </span>
+              )}
+            </div>
 
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            <span className={`text-[10px] tabular-nums ${isDarkMode ? 'text-dark-600' : 'text-zinc-400'}`}>
-              {new Date(node.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase()}
-            </span>
-            {isInContext && (
-              <span className={`w-1.5 h-1.5 rounded-full ${isDarkMode ? 'bg-canopy-400' : 'bg-canopy-500'}`} />
-            )}
-          </div>
-        </button>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <span className={`text-[10px] tabular-nums ${isDarkMode ? 'text-dark-600' : 'text-zinc-400'}`}>
+                {new Date(node.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase()}
+              </span>
+              {isInContext && (
+                <span className={`w-1.5 h-1.5 rounded-full ${isDarkMode ? 'bg-canopy-400' : 'bg-canopy-500'}`} />
+              )}
+            </div>
+          </button>
+        )}
       </div>
     );
   };
@@ -568,11 +648,11 @@ const GraphView: React.FC<GraphViewProps> = ({
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={onToggleDarkMode}
+            onClick={onOpenSettings}
             className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-dark-800 text-dark-400 hover:text-dark-200' : 'hover:bg-canopy-50 text-dark-400 hover:text-dark-600'}`}
-            title={isDarkMode ? 'Light mode' : 'Dark mode'}
+            title="Settings"
           >
-            {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            <Settings className="w-4 h-4" />
           </button>
           <button
             onClick={onToggleSidebar}
@@ -601,63 +681,108 @@ const GraphView: React.FC<GraphViewProps> = ({
       {/* Project Tabs */}
       <div className={`flex items-center gap-1 px-2 py-1.5 border-b overflow-x-auto ${isDarkMode ? 'border-dark-800 bg-dark-900/50' : 'border-canopy-100 bg-white/50'}`}>
         {projects.map(project => (
-          <button
-            key={project.id}
-            onClick={(e) => {
-              if (e.shiftKey) {
-                onRenameProject(project.id);
-              } else {
-                onSelectProject(project.id);
+          <div key={project.id} className="relative">
+            {editingProjectId === project.id ? (
+              <input
+                ref={editInputRef}
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onBlur={() => {
+                  onRenameProject(project.id, editValue);
+                  setEditingProjectId(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    onRenameProject(project.id, editValue);
+                    setEditingProjectId(null);
+                  } else if (e.key === 'Escape') {
+                    setEditingProjectId(null);
+                  }
+                }}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg outline-none ring-2 ring-canopy-500/50 ${isDarkMode ? 'bg-dark-800 text-white' : 'bg-white text-dark-900 shadow-sm'
+                  }`}
+              />
+            ) : (
+              <button
+                onClick={(e) => {
+                  if (e.shiftKey) {
+                    setEditingProjectId(project.id);
+                    setEditValue(project.name);
+                  } else {
+                    onSelectProject(project.id);
+                  }
+                }}
+                className={`group flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all whitespace-nowrap ${activeProjectId === project.id
+                  ? isDarkMode
+                    ? 'bg-canopy-500/20 text-canopy-400 ring-1 ring-canopy-500/30'
+                    : 'bg-canopy-50 text-canopy-700 ring-1 ring-canopy-200'
+                  : isDarkMode
+                    ? 'text-dark-400 hover:bg-dark-800 hover:text-dark-300'
+                    : 'text-dark-500 hover:bg-canopy-50/50 hover:text-dark-700'
+                  }`}
+                title="Click to switch, Shift+Click to rename"
+              >
+                <span>{project.name}</span>
+                {projects.length > 1 && (
+                  <X
+                    className={`w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity ${isDarkMode ? 'hover:text-red-400' : 'hover:text-red-500'}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteProject(project.id);
+                    }}
+                  />
+                )}
+              </button>
+            )}
+          </div>
+        ))}
+        {isCreatingProject ? (
+          <input
+            ref={editInputRef}
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={() => {
+              if (editValue.trim()) onCreateProject(editValue);
+              setIsCreatingProject(false);
+              setEditValue("");
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                if (editValue.trim()) onCreateProject(editValue);
+                setIsCreatingProject(false);
+                setEditValue("");
+              } else if (e.key === 'Escape') {
+                setIsCreatingProject(false);
+                setEditValue("");
               }
             }}
-            className={`group flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all whitespace-nowrap ${
-              activeProjectId === project.id
-                ? isDarkMode
-                  ? 'bg-canopy-500/20 text-canopy-400 ring-1 ring-canopy-500/30'
-                  : 'bg-canopy-50 text-canopy-700 ring-1 ring-canopy-200'
-                : isDarkMode
-                  ? 'text-dark-400 hover:bg-dark-800 hover:text-dark-300'
-                  : 'text-dark-500 hover:bg-canopy-50/50 hover:text-dark-700'
-            }`}
-            title="Click to switch, Shift+Click to rename"
-          >
-            <span>{project.name}</span>
-            {projects.length > 1 && (
-              <X
-                className={`w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity ${isDarkMode ? 'hover:text-red-400' : 'hover:text-red-500'}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDeleteProject(project.id);
-                }}
-              />
-            )}
-          </button>
-        ))}
-        <button
-          onClick={onCreateProject}
-          className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs transition-all border border-dashed ${
-            isDarkMode
+            placeholder="New project..."
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg outline-none ring-2 ring-canopy-500/50 ${isDarkMode ? 'bg-dark-800 text-white' : 'bg-white text-dark-900 shadow-sm'
+              }`}
+          />
+        ) : (
+          <button
+            onClick={() => {
+              setIsCreatingProject(true);
+              setEditValue("");
+            }}
+            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs transition-all border ${isDarkMode
               ? 'text-dark-500 border-dark-700 hover:text-dark-400 hover:border-dark-600'
-              : 'text-dark-400 border-dark-200 hover:text-dark-500 hover:border-dark-300'
-          }`}
-          title="New project"
-        >
-          <Plus className="w-3 h-3" />
-        </button>
+              : 'text-dark-400 border-dark-200 hover:text-dark-500 hover:border-dark-300 shadow-sm'
+              }`}
+            title="New project"
+          >
+            <Plus className="w-3 h-3" />
+          </button>
+        )}
       </div>
 
       <div ref={containerRef} className="flex-1 relative overflow-hidden">
-        {!treeData && (
-          <div className={`absolute inset-0 flex items-center justify-center text-sm ${isDarkMode ? 'text-dark-500' : 'text-dark-400'}`}>
-            Start a conversation
-          </div>
-        )}
-
         {!sidebarExpanded && treeData && (
           <div className={`h-full overflow-y-auto py-2 px-2 custom-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:none] ${isDarkMode ? '' : 'bg-zinc-50/30'}`}>
             {pathToActive.length === 0 ? (
-              <div className={`text-[14px] text-center ${isDarkMode ? 'text-dark-400' : 'text-zinc-400'}`}>
-                No active conversation
+              <div className={`mt-8 text-[13px] text-center px-6 ${isDarkMode ? 'text-dark-500' : 'text-zinc-400'}`}>
+                Add a message below to start your conversation path.
               </div>
             ) : (
               <div className="space-y-0.5">
@@ -688,7 +813,48 @@ const GraphView: React.FC<GraphViewProps> = ({
         )}
 
         {sidebarExpanded && (
-          <svg ref={svgRef} className="w-full h-full" />
+          <>
+            <svg ref={svgRef} className="w-full h-full" />
+            {editingNodeId && sidebarExpanded && nodePositionsRef.current.has(editingNodeId) && (
+              (() => {
+                const pos = nodePositionsRef.current.get(editingNodeId)!;
+                const transform = currentTransformRef.current || d3.zoomIdentity;
+                const x = pos.x * transform.k + transform.x;
+                const y = pos.y * transform.k + transform.y;
+
+                return (
+                  <div
+                    className="absolute z-[110] pointer-events-none"
+                    style={{
+                      left: x,
+                      top: y,
+                      transform: 'translate(-50%, -50%)'
+                    }}
+                  >
+                    <input
+                      ref={editInputRef}
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onBlur={() => {
+                        onRenameNode(editingNodeId, editValue);
+                        setEditingNodeId(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          onRenameNode(editingNodeId, editValue);
+                          setEditingNodeId(null);
+                        } else if (e.key === 'Escape') {
+                          setEditingNodeId(null);
+                        }
+                      }}
+                      className={`pointer-events-auto min-w-[120px] max-w-[200px] px-3 py-2 rounded-xl text-sm font-semibold outline-none ring-2 ring-canopy-500 shadow-xl ${isDarkMode ? 'bg-dark-900 text-white' : 'bg-white text-dark-900'
+                        }`}
+                    />
+                  </div>
+                );
+              })()
+            )}
+          </>
         )}
 
         {/* Node Hover Tooltip */}
@@ -737,6 +903,20 @@ const GraphView: React.FC<GraphViewProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-1.5 flex flex-col gap-1">
+              <button
+                onClick={() => {
+                  const node = nodes.find(n => n.id === contextMenu.nodeId);
+                  setEditValue(node?.summary || "");
+                  setEditingNodeId(contextMenu.nodeId!);
+                  setContextMenu(null);
+                }}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-[14px] font-medium transition-colors ${isDarkMode ? 'hover:bg-dark-800 text-dark-300' : 'hover:bg-zinc-100 text-dark-600'
+                  }`}
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                Rename Node
+              </button>
+
               {contextMenu.isArchived ? (
                 <button
                   onClick={() => {
@@ -762,6 +942,7 @@ const GraphView: React.FC<GraphViewProps> = ({
                   Archive Node
                 </button>
               )}
+
               <button
                 onClick={() => {
                   onDeleteNode(contextMenu.nodeId!);

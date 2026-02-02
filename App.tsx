@@ -17,7 +17,9 @@ import {
   archiveChildrenOnly,
   deleteChildrenOnly
 } from './utils/treeUtils';
-import { Send, Loader2, Sparkles, Moon, Sun, TreePalm } from 'lucide-react';
+import { Send, Loader2, Sparkles, Moon, Sun, TreePalm, Settings } from 'lucide-react';
+import SettingsModal from './components/SettingsModal';
+import { GeminiModelId, DEFAULT_MODEL } from './services/geminiService';
 
 // Feature imports - organized by feature module
 import {
@@ -92,25 +94,62 @@ const App: React.FC = () => {
   // Archive view toggle state
   const [showArchived, setShowArchived] = useState(false);
 
-  // UI State
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    const saved = localStorage.getItem('canopy_dark_mode');
-    return saved ? JSON.parse(saved) : false;
+  // Settings state
+  const [themePreference, setThemePreference] = useState<'light' | 'dark' | 'system'>(() => {
+    const saved = localStorage.getItem('canopy_theme_preference');
+    return (saved as 'light' | 'dark' | 'system') || 'system';
   });
+  const [selectedModel, setSelectedModel] = useState<GeminiModelId>(() => {
+    const saved = localStorage.getItem('canopy_selected_model');
+    return (saved as GeminiModelId) || DEFAULT_MODEL;
+  });
+  const [userApiKey, setUserApiKey] = useState<string>(() => {
+    return localStorage.getItem('canopy_user_api_key') || '';
+  });
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  const [isDarkMode, setIsDarkMode] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState(() => {
     const saved = localStorage.getItem('canopy_sidebar_expanded');
     return saved ? JSON.parse(saved) : false;
   });
 
-  // Dark mode effect
+  // Theme effect
   useEffect(() => {
-    localStorage.setItem('canopy_dark_mode', JSON.stringify(isDarkMode));
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
+    localStorage.setItem('canopy_theme_preference', themePreference);
+
+    const updateTheme = () => {
+      let shouldBeDark = false;
+      if (themePreference === 'system') {
+        shouldBeDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      } else {
+        shouldBeDark = themePreference === 'dark';
+      }
+      setIsDarkMode(shouldBeDark);
+      if (shouldBeDark) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    };
+
+    updateTheme();
+
+    if (themePreference === 'system') {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const listener = () => updateTheme();
+      mediaQuery.addEventListener('change', listener);
+      return () => mediaQuery.removeEventListener('change', listener);
     }
-  }, [isDarkMode]);
+  }, [themePreference]);
+
+  useEffect(() => {
+    localStorage.setItem('canopy_selected_model', selectedModel);
+  }, [selectedModel]);
+
+  useEffect(() => {
+    localStorage.setItem('canopy_user_api_key', userApiKey);
+  }, [userApiKey]);
 
   useEffect(() => {
     localStorage.setItem('canopy_sidebar_expanded', JSON.stringify(sidebarExpanded));
@@ -206,7 +245,7 @@ const App: React.FC = () => {
       const streamUsage = await streamChatResponse(history, promptText, (chunk) => {
         fullResponse += chunk;
         setStreamingResponse(fullResponse);
-      });
+      }, selectedModel, userApiKey);
 
       // Update API stats for streaming call (from api-stats feature)
       if (streamUsage) {
@@ -214,7 +253,7 @@ const App: React.FC = () => {
       }
 
       // Generate summary after streaming completes (second API call)
-      const { summary, usage: summaryUsage } = await generateChatResponse(history, promptText, true);
+      const { summary, usage: summaryUsage } = await generateChatResponse(history, promptText, true, selectedModel, userApiKey);
 
       // Update API stats for summary call (from api-stats feature)
       if (summaryUsage) {
@@ -232,22 +271,23 @@ const App: React.FC = () => {
       setFocusNodeId(newNodeId);
       // Clear focus after animation completes
       setTimeout(() => setFocusNodeId(null), 600);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to generate response:", error);
       setNodes(prev => prev.filter(n => n.id !== newNodeId));
       setActiveNodeId(activeNodeId);
-      alert("Error generating response. Please check your API key.");
+
+      const errorMsg = error.message || "Unknown error";
+      alert(`Error generating response: ${errorMsg}\n\nPlease check your API key and model selection in Settings.`);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleCreateProject = () => {
-    const name = prompt("Project name?");
-    if (name) {
+  const handleCreateProject = (name: string) => {
+    if (name && name.trim()) {
       const newProject: Project = {
         id: uuidv4(),
-        name,
+        name: name.trim(),
         createdAt: Date.now()
       };
       setProjects(prev => [...prev, newProject]);
@@ -258,17 +298,15 @@ const App: React.FC = () => {
   };
 
   const handleDeleteProject = (id: string) => {
-    if (confirm("Delete project and all its nodes?")) {
-      const updatedProjects = projects.filter(p => p.id !== id);
-      const updatedNodes = nodes.filter(n => n.projectId !== id);
-      setProjects(updatedProjects);
-      setNodes(updatedNodes);
-      if (activeProjectId === id) {
-        const nextProject = updatedProjects[0]?.id || null;
-        setActiveProjectId(nextProject);
-        setActiveNodeId(null);
-        setContextNodeIds(new Set());
-      }
+    const updatedProjects = projects.filter(p => p.id !== id);
+    const updatedNodes = nodes.filter(n => n.projectId !== id);
+    setProjects(updatedProjects);
+    setNodes(updatedNodes);
+    if (activeProjectId === id) {
+      const nextProject = updatedProjects[0]?.id || null;
+      setActiveProjectId(nextProject);
+      setActiveNodeId(null);
+      setContextNodeIds(new Set());
     }
   };
 
@@ -284,10 +322,7 @@ const App: React.FC = () => {
     setContextNodeIds(new Set());
   };
 
-  const handleRenameProject = (id: string) => {
-    const project = projects.find(p => p.id === id);
-    if (!project) return;
-    const newName = prompt("Rename project:", project.name);
+  const handleRenameProject = (id: string, newName: string) => {
     if (newName && newName.trim()) {
       setProjects(prev => prev.map(p =>
         p.id === id ? { ...p, name: newName.trim() } : p
@@ -295,10 +330,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleRenameNode = (id: string) => {
-    const node = nodes.find(n => n.id === id);
-    if (!node) return;
-    const newSummary = prompt("Rename node:", node.summary);
+  const handleRenameNode = (id: string, newSummary: string) => {
     if (newSummary && newSummary.trim()) {
       setNodes(prev => prev.map(n =>
         n.id === id ? { ...n, summary: newSummary.trim() } : n
@@ -426,19 +458,42 @@ const App: React.FC = () => {
 
   const sidebarRef = useRef<ImperativePanelHandle>(null);
 
+  const currentSidebarSizeRef = useRef<number>(sidebarExpanded ? 50 : 25);
+
   useEffect(() => {
     const panels = sidebarRef.current;
     if (panels) {
       const targetSize = sidebarExpanded ? 50 : 25;
-      requestAnimationFrame(() => {
-        panels.resize(targetSize);
-      });
+      const currentSize = currentSidebarSizeRef.current;
+
+      // Only snap/resize if the difference is significant (>15%)
+      // This prevents fighting with the user during manual drag resizing
+      // while ensuring the toggle button still works effectivey
+      if (Math.abs(currentSize - targetSize) > 15) {
+        requestAnimationFrame(() => {
+          panels.resize(targetSize);
+        });
+      }
     }
   }, [sidebarExpanded]);
 
   return (
     <div className={`flex h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark bg-dark-950 text-dark-100' : 'bg-zinc-100/20 text-dark-800'}`}>
-      <PanelGroup direction="horizontal" className="flex-1">
+      <PanelGroup
+        direction="horizontal"
+        className="flex-1"
+        onLayout={(sizes) => {
+          const sidebarSize = sizes[0];
+          currentSidebarSizeRef.current = sidebarSize;
+
+          // Sync state with manual resize
+          if (sidebarExpanded && sidebarSize < 35) {
+            setSidebarExpanded(false);
+          } else if (!sidebarExpanded && sidebarSize > 40) {
+            setSidebarExpanded(true);
+          }
+        }}
+      >
         {/* Sidebar Panel */}
         <Panel
           id="sidebar-panel"
@@ -458,7 +513,6 @@ const App: React.FC = () => {
             isDarkMode={isDarkMode}
             sidebarExpanded={sidebarExpanded}
             onToggleSidebar={() => setSidebarExpanded(!sidebarExpanded)}
-            onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
             showArchived={showArchived}
             onToggleShowArchived={() => setShowArchived(!showArchived)}
             onNodeClick={handleNodeClick}
@@ -471,6 +525,7 @@ const App: React.FC = () => {
             onArchiveNode={handleArchiveNode}
             onDeleteNode={handleDeleteNode}
             onUnarchiveNode={handleUnarchiveNode}
+            onOpenSettings={() => setIsSettingsOpen(true)}
           />
         </Panel>
 
@@ -564,6 +619,19 @@ const App: React.FC = () => {
         isDarkMode={isDarkMode}
         onConfirm={handleModalConfirm}
         onCancel={handleModalCancel}
+      />
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        selectedModel={selectedModel}
+        onSelectModel={setSelectedModel}
+        userApiKey={userApiKey}
+        onSetApiKey={setUserApiKey}
+        theme={themePreference}
+        onSelectTheme={setThemePreference}
+        isDarkMode={isDarkMode}
       />
     </div>
   );
