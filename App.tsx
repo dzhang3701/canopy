@@ -10,9 +10,7 @@ import { getAncestorPath } from './utils/treeUtils';
 import { Send, Loader2, Sparkles, GripVertical } from 'lucide-react';
 
 const STARTER_PROJECTS: Project[] = [
-  { id: 'p1', name: 'Exploration', icon: '🚀', createdAt: Date.now() },
-  { id: 'p2', name: 'Problem Solving', icon: '🧩', createdAt: Date.now() },
-  { id: 'p3', name: 'Class Notes', icon: '📝', createdAt: Date.now() },
+  { id: 'p1', name: 'Exploration', icon: '🚀', createdAt: Date.now() }
 ];
 
 const App: React.FC = () => {
@@ -42,6 +40,7 @@ const App: React.FC = () => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [streamingResponse, setStreamingResponse] = useState('');
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
 
   // Persistence
   useEffect(() => {
@@ -129,7 +128,10 @@ const App: React.FC = () => {
 
       setNodes(prev => [...prev, newNode]);
       setActiveNodeId(newNode.id);
+      setFocusNodeId(newNode.id);
       setStreamingResponse('');
+      // Clear focus after animation completes
+      setTimeout(() => setFocusNodeId(null), 600);
     } catch (error) {
       console.error("Failed to generate response:", error);
       alert("Error generating response. Please check your API key.");
@@ -187,8 +189,8 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-full bg-green-50 overflow-hidden font-sans">
-      <PanelGroup direction="horizontal" className="flex-1">
+    <div className="flex h-screen w-full bg-gradient-to-br from-emerald-50 via-green-50 to-teal-50 overflow-hidden font-sans">
+      <PanelGroup orientation="horizontal" className="flex-1">
         {/* Graph Panel with Project Tabs */}
         <Panel defaultSize={50} minSize={30}>
           <GraphView
@@ -198,6 +200,7 @@ const App: React.FC = () => {
             activeNodeId={activeNodeId}
             contextNodeIds={contextNodeIds}
             activePathIds={new Set(activePath.map(n => n.id))}
+            focusNodeId={focusNodeId}
             onNodeClick={handleNodeClick}
             onToggleContext={handleToggleContext}
             onSelectProject={handleSelectProject}
@@ -206,9 +209,10 @@ const App: React.FC = () => {
           />
         </Panel>
 
-        {/* Resize Handle */}
-        <PanelResizeHandle className="w-2 bg-green-100 hover:bg-green-200 transition-colors flex items-center justify-center group">
-          <GripVertical className="w-3 h-3 text-green-400 group-hover:text-green-600" />
+        {/* Resize Handle - Branch-like divider */}
+        <PanelResizeHandle className="w-2 bg-gradient-to-b from-emerald-200 via-green-100 to-emerald-200 hover:from-emerald-300 hover:via-green-200 hover:to-emerald-300 transition-colors flex items-center justify-center group relative">
+          <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iOCIgaGVpZ2h0PSI0MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNNCAwdjQwIiBzdHJva2U9IiMwNTk2NjkiIHN0cm9rZS13aWR0aD0iMC41IiBvcGFjaXR5PSIwLjMiLz48L3N2Zz4=')] opacity-50" />
+          <GripVertical className="w-3 h-3 text-emerald-500 group-hover:text-emerald-700 relative z-10" />
         </PanelResizeHandle>
 
         {/* Chat Panel */}
@@ -225,34 +229,38 @@ const App: React.FC = () => {
               isLoading={isLoading}
             />
 
-            {/* Input Area */}
-            <div className="p-4 bg-white border-t border-green-200">
+            {/* Input Area - Soil/ground themed */}
+            <div className="p-4 bg-gradient-to-t from-amber-50/30 via-white to-white border-t border-emerald-200/50">
               <form
                 onSubmit={handleSendMessage}
                 className="relative"
               >
-                <div className="flex items-center gap-2 text-[10px] text-green-500 mb-2 font-mono">
-                  <Sparkles className="w-3 h-3" />
-                  {contextNodeIds.size > 0
-                    ? `${contextNodeIds.size} nodes in context`
-                    : `${activePath.length} turns active`
-                  }
+                <div className="flex items-center gap-2 text-[10px] text-emerald-500 mb-2 font-medium">
+                  <Sparkles className="w-3 h-3 text-amber-500" />
+                  <span className="bg-emerald-100/50 px-2 py-0.5 rounded-full">
+                    {contextNodeIds.size > 0
+                      ? `${contextNodeIds.size} branches in context`
+                      : `${activePath.length} nodes on path`
+                    }
+                  </span>
                 </div>
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder={activeProjectId ? "Type a message..." : "Select a project to start..."}
-                  disabled={!activeProjectId || isLoading}
-                  className="w-full bg-green-50 border border-green-300 rounded-xl py-3 pl-4 pr-12 text-green-800 placeholder:text-green-400 focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500/50 transition-all disabled:opacity-50"
-                />
-                <button
-                  type="submit"
-                  disabled={!input.trim() || isLoading || !activeProjectId}
-                  className="absolute right-2 top-[calc(50%+10px)] -translate-y-1/2 p-2 rounded-lg bg-green-600 text-white hover:bg-green-500 transition-colors disabled:opacity-50 disabled:hover:bg-green-600"
-                >
-                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                </button>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={activeProjectId ? "Plant a new thought..." : "Select a branch to start..."}
+                    disabled={!activeProjectId || isLoading}
+                    className="w-full bg-gradient-to-r from-emerald-50/50 to-green-50/50 border border-emerald-300/70 rounded-2xl py-3.5 pl-5 pr-14 text-emerald-800 placeholder:text-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 transition-all disabled:opacity-50 shadow-inner"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!input.trim() || isLoading || !activeProjectId}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 text-white hover:from-emerald-400 hover:to-green-500 transition-all disabled:opacity-50 disabled:hover:from-emerald-500 shadow-md hover:shadow-lg"
+                  >
+                    {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  </button>
+                </div>
               </form>
             </div>
           </div>
