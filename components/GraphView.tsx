@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import * as d3 from 'd3';
 import { ChatNode, TreeDataNode, Project } from '../types';
-import { buildHierarchy, getChildCount, getAncestorPath } from '../utils/treeUtils';
-import { Plus, X, Leaf } from 'lucide-react';
+import { buildHierarchy, buildArchivedHierarchy, getChildCount, getAncestorPath } from '../utils/treeUtils';
+import { Plus, X, Leaf, Archive, ArchiveRestore, Trash2, Eye } from 'lucide-react';
 
 // Helper function to wrap text into multiple lines
 function wrapText(text: string, maxChars: number, maxLines: number): string[] {
@@ -53,6 +53,8 @@ interface GraphViewProps {
   contextNodeIds: Set<string>;
   activePathIds: Set<string>;
   focusNodeId: string | null; // When set, auto-focus on this node with ancestors
+  showArchived: boolean;
+  onToggleShowArchived: () => void;
   onNodeClick: (id: string) => void;
   onToggleContext: (id: string) => void;
   onSelectProject: (id: string) => void;
@@ -68,13 +70,6 @@ interface TooltipData {
   y: number;
   node: ChatNode;
   isContextNode: boolean; // If true, show only summary
-}
-
-interface NodeActionsData {
-  x: number;
-  y: number;
-  nodeId: string;
-  nodeSummary: string;
 }
 
 interface NodeActionsData {

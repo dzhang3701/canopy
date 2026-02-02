@@ -427,6 +427,8 @@ const App: React.FC = () => {
             contextNodeIds={contextNodeIds}
             activePathIds={new Set(activePath.map(n => n.id))}
             focusNodeId={focusNodeId}
+            showArchived={showArchived}
+            onToggleShowArchived={() => setShowArchived(!showArchived)}
             onNodeClick={handleNodeClick}
             onToggleContext={handleToggleContext}
             onSelectProject={handleSelectProject}
