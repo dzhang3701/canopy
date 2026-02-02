@@ -17,13 +17,32 @@ import {
   archiveChildrenOnly,
   deleteChildrenOnly
 } from './utils/treeUtils';
-import { Send, Loader2, Sparkles, GripVertical, Moon, Sun } from 'lucide-react';
+import { Send, Loader2, Sparkles, Moon, Sun, TreePalm } from 'lucide-react';
+
+// Feature imports - organized by feature module
+import {
+  ApiUsageStats,
+  DEFAULT_API_STATS,
+  ApiStatsPanel,
+  updateApiStats,
+  resetApiStats,
+} from './features/api-stats';
 
 const STARTER_PROJECTS: Project[] = [
   { id: 'p1', name: 'Exploration', createdAt: Date.now() },
   { id: 'p2', name: 'Problem Solving', createdAt: Date.now() },
   { id: 'p3', name: 'Class Notes', createdAt: Date.now() },
 ];
+
+// Modal state interface
+interface NodeActionModalState {
+  isOpen: boolean;
+  actionType: ActionType;
+  nodeId: string;
+  nodeSummary: string;
+  isRootNode: boolean;
+  hasChildren: boolean;
+}
 
 const App: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>(() => {
@@ -52,6 +71,26 @@ const App: React.FC = () => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [streamingResponse, setStreamingResponse] = useState('');
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+
+  // API stats state (from api-stats feature)
+  const [apiStats, setApiStats] = useState<ApiUsageStats>(() => {
+    const saved = localStorage.getItem('canopy_api_stats');
+    return saved ? JSON.parse(saved) : DEFAULT_API_STATS;
+  });
+
+  // Node action modal state
+  const [modalState, setModalState] = useState<NodeActionModalState>({
+    isOpen: false,
+    actionType: 'delete',
+    nodeId: '',
+    nodeSummary: '',
+    isRootNode: false,
+    hasChildren: false,
+  });
+
+  // Archive view toggle state
+  const [showArchived, setShowArchived] = useState(false);
 
   // UI State
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -61,24 +100,6 @@ const App: React.FC = () => {
   const [sidebarExpanded, setSidebarExpanded] = useState(() => {
     const saved = localStorage.getItem('canopy_sidebar_expanded');
     return saved ? JSON.parse(saved) : false;
-  });
-
-  const [showArchived, setShowArchived] = useState(false);
-
-  const [modalState, setModalState] = useState<{
-    isOpen: boolean;
-    actionType: ActionType;
-    nodeId: string;
-    isRootNode: boolean;
-    hasChildren: boolean;
-    nodeSummary: string;
-  }>({
-    isOpen: false,
-    actionType: 'archive',
-    nodeId: '',
-    isRootNode: false,
-    hasChildren: false,
-    nodeSummary: '',
   });
 
   // Dark mode effect
@@ -115,6 +136,11 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('canopy_context_nodes', JSON.stringify([...contextNodeIds]));
   }, [contextNodeIds]);
+
+  // Persist API stats (from api-stats feature)
+  useEffect(() => {
+    localStorage.setItem('canopy_api_stats', JSON.stringify(apiStats));
+  }, [apiStats]);
 
   const activePath = useMemo(() => {
     if (!activeNodeId) return [];
@@ -175,14 +201,25 @@ const App: React.FC = () => {
     try {
       const history = contextPath.length > 0 ? contextPath : activePath;
 
+      // Stream the response (first API call)
       let fullResponse = '';
-      await streamChatResponse(history, promptText, (chunk) => {
+      const streamUsage = await streamChatResponse(history, promptText, (chunk) => {
         fullResponse += chunk;
         setStreamingResponse(fullResponse);
       });
 
-      // Generate summary after streaming completes
-      const { summary } = await generateChatResponse(history, promptText, true);
+      // Update API stats for streaming call (from api-stats feature)
+      if (streamUsage) {
+        setApiStats(prev => updateApiStats(prev, streamUsage));
+      }
+
+      // Generate summary after streaming completes (second API call)
+      const { summary, usage: summaryUsage } = await generateChatResponse(history, promptText, true);
+
+      // Update API stats for summary call (from api-stats feature)
+      if (summaryUsage) {
+        setApiStats(prev => updateApiStats(prev, summaryUsage));
+      }
 
       // Update the node with the full response and the real summary
       setNodes(prev => prev.map(n =>
@@ -192,6 +229,9 @@ const App: React.FC = () => {
       ));
 
       setStreamingResponse('');
+      setFocusNodeId(newNodeId);
+      // Clear focus after animation completes
+      setTimeout(() => setFocusNodeId(null), 600);
     } catch (error) {
       console.error("Failed to generate response:", error);
       setNodes(prev => prev.filter(n => n.id !== newNodeId));
@@ -219,10 +259,13 @@ const App: React.FC = () => {
 
   const handleDeleteProject = (id: string) => {
     if (confirm("Delete project and all its nodes?")) {
-      setProjects(prev => prev.filter(p => p.id !== id));
-      setNodes(prev => prev.filter(n => n.projectId !== id));
+      const updatedProjects = projects.filter(p => p.id !== id);
+      const updatedNodes = nodes.filter(n => n.projectId !== id);
+      setProjects(updatedProjects);
+      setNodes(updatedNodes);
       if (activeProjectId === id) {
-        setActiveProjectId(projects.find(p => p.id !== id)?.id || null);
+        const nextProject = updatedProjects[0]?.id || null;
+        setActiveProjectId(nextProject);
         setActiveNodeId(null);
         setContextNodeIds(new Set());
       }
@@ -231,7 +274,7 @@ const App: React.FC = () => {
 
   const handleSelectProject = (id: string) => {
     setActiveProjectId(id);
-    const projectNodes = nodes.filter(n => n.projectId === id);
+    const projectNodes = nodes.filter(n => n.projectId === id && !n.isArchived);
     if (projectNodes.length > 0) {
       const latest = [...projectNodes].sort((a, b) => b.timestamp - a.timestamp)[0];
       setActiveNodeId(latest.id);
@@ -303,11 +346,15 @@ const App: React.FC = () => {
     if (actionType === 'unarchive') {
       const updatedNodes = unarchiveNodeWithChildren(nodes, nodeId);
       setNodes(updatedNodes);
+      setShowArchived(false);
+      setActiveNodeId(nodeId);
+      setFocusNodeId(nodeId);
     } else if (actionType === 'delete') {
       if (deleteAll && modalState.isRootNode) {
-        // Delete entire project
-        setNodes(nodes.filter(n => n.projectId !== activeProjectId));
+        const updatedNodes = nodes.filter(n => n.projectId !== activeProjectId);
+        setNodes(updatedNodes);
         setActiveNodeId(null);
+        setContextNodeIds(new Set());
       } else if (modalState.isRootNode && !deleteAll) {
         const result = deleteChildrenOnly(nodes, nodeId, activeNodeId);
         setNodes(result.updatedNodes);
@@ -323,10 +370,10 @@ const App: React.FC = () => {
       }
     } else if (actionType === 'archive') {
       if (deleteAll && modalState.isRootNode) {
-        // Archive entire project nodes
         const updatedNodes = nodes.map(n => n.projectId === activeProjectId ? { ...n, isArchived: true } : n);
         setNodes(updatedNodes);
         setActiveNodeId(null);
+        setContextNodeIds(new Set());
       } else if (modalState.isRootNode && !deleteAll) {
         const result = archiveChildrenOnly(nodes, nodeId, activeNodeId);
         setNodes(result.updatedNodes);
@@ -351,14 +398,15 @@ const App: React.FC = () => {
     handleModalCancel();
   };
 
+  const handleResetStats = () => {
+    setApiStats(resetApiStats());
+  };
+
   const sidebarRef = useRef<ImperativePanelHandle>(null);
 
-  // Sidebar expansion effect
-  // Sidebar expansion effect with improved robustness
   useEffect(() => {
     const panels = sidebarRef.current;
     if (panels) {
-      // Use requestAnimationFrame to ensure the panel handle is fully ready
       const targetSize = sidebarExpanded ? 50 : 25;
       requestAnimationFrame(() => {
         panels.resize(targetSize);
@@ -369,7 +417,7 @@ const App: React.FC = () => {
   return (
     <div className={`flex h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark bg-dark-950 text-dark-100' : 'bg-canopy-50/30 text-dark-800'}`}>
       <PanelGroup direction="horizontal" className="flex-1">
-        {/* Graph Panel with Project Tabs */}
+        {/* Sidebar Panel */}
         <Panel
           id="sidebar-panel"
           ref={sidebarRef}
@@ -384,17 +432,18 @@ const App: React.FC = () => {
             activeNodeId={activeNodeId}
             contextNodeIds={contextNodeIds}
             activePathIds={new Set(activePath.map(n => n.id))}
-            onNodeClick={handleNodeClick}
-            onToggleContext={handleToggleContext}
-            onSelectProject={handleSelectProject}
-            onCreateProject={handleCreateProject}
-            onDeleteProject={handleDeleteProject}
+            focusNodeId={focusNodeId}
             isDarkMode={isDarkMode}
             sidebarExpanded={sidebarExpanded}
             onToggleSidebar={() => setSidebarExpanded(!sidebarExpanded)}
             onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
             showArchived={showArchived}
             onToggleShowArchived={() => setShowArchived(!showArchived)}
+            onNodeClick={handleNodeClick}
+            onToggleContext={handleToggleContext}
+            onSelectProject={handleSelectProject}
+            onCreateProject={handleCreateProject}
+            onDeleteProject={handleDeleteProject}
             onArchiveNode={handleArchiveNode}
             onDeleteNode={handleDeleteNode}
             onUnarchiveNode={handleUnarchiveNode}
@@ -478,6 +527,10 @@ const App: React.FC = () => {
         </Panel>
       </PanelGroup>
 
+      {/* API Stats Overlay */}
+      <ApiStatsPanel stats={apiStats} onReset={handleResetStats} />
+
+      {/* Modal Overlay */}
       <NodeActionModal
         isOpen={modalState.isOpen}
         actionType={modalState.actionType}

@@ -57,7 +57,6 @@ const ChatView: React.FC<ChatViewProps> = ({
       ) : (
         <div className="flex flex-col space-y-10 max-w-3xl mx-auto pb-10">
           {activePath.map((node, index) => {
-            const isInContext = contextNodeIds.has(node.id);
             const hasResponse = node.assistantResponse && node.assistantResponse.trim().length > 0;
 
             return (
@@ -65,8 +64,8 @@ const ChatView: React.FC<ChatViewProps> = ({
                 {/* User Prompt */}
                 <div className="flex flex-col items-end pl-10 group">
                   <div className={`px-6 py-4 rounded-[1.75rem] rounded-br-md shadow-sm text-[15px] leading-relaxed whitespace-pre-wrap transition-all ${isDarkMode
-                      ? 'bg-dark-800 text-dark-50 border border-dark-700 group-hover:border-dark-600'
-                      : 'bg-white text-dark-900 border border-canopy-100 group-hover:border-canopy-200 shadow-sm'
+                    ? 'bg-dark-800 text-dark-50 border border-dark-700 group-hover:border-dark-600'
+                    : 'bg-white text-dark-900 border border-canopy-100 group-hover:border-canopy-200 shadow-sm'
                     }`}>
                     {node.userPrompt}
                   </div>
@@ -86,8 +85,8 @@ const ChatView: React.FC<ChatViewProps> = ({
 
                     <div className="flex-1 space-y-3">
                       <div className={`prose prose-sm leading-relaxed max-w-none prose-headings:font-bold prose-a:font-medium prose-a:no-underline hover:prose-a:underline ${isDarkMode
-                          ? 'prose-invert prose-p:text-dark-300 prose-headings:text-dark-50 prose-strong:text-dark-100 prose-code:text-canopy-300 prose-code:bg-dark-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-dark-900/50 prose-pre:border prose-pre:border-dark-800 prose-a:text-canopy-400'
-                          : 'prose-zinc prose-p:text-dark-700 prose-headings:text-dark-900 prose-code:text-canopy-700 prose-code:bg-canopy-50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-canopy-50/30 prose-pre:border prose-pre:border-canopy-100 prose-a:text-canopy-600'
+                        ? 'prose-invert prose-p:text-dark-300 prose-headings:text-dark-50 prose-strong:text-dark-100 prose-code:text-canopy-300 prose-code:bg-dark-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-dark-900/50 prose-pre:border prose-pre:border-dark-800 prose-a:text-canopy-400'
+                        : 'prose-zinc prose-p:text-dark-700 prose-headings:text-dark-900 prose-code:text-canopy-700 prose-code:bg-canopy-50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-canopy-50/30 prose-pre:border prose-pre:border-canopy-100 prose-a:text-canopy-600'
                         }`}>
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm, remarkMath]}
@@ -107,8 +106,8 @@ const ChatView: React.FC<ChatViewProps> = ({
                           <button
                             onClick={() => navigator.clipboard.writeText(node.assistantResponse)}
                             className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all ${isDarkMode
-                                ? 'text-dark-400 hover:text-dark-200 hover:bg-dark-800'
-                                : 'text-dark-500 hover:text-canopy-700 hover:bg-canopy-50'
+                              ? 'text-dark-400 hover:text-dark-200 hover:bg-dark-800'
+                              : 'text-dark-500 hover:text-canopy-700 hover:bg-canopy-50'
                               }`}
                           >
                             <Copy className="w-3.5 h-3.5" />
@@ -133,8 +132,8 @@ const ChatView: React.FC<ChatViewProps> = ({
               <div className="flex-1">
                 {streamingResponse ? (
                   <div className={`prose prose-sm leading-relaxed max-w-none ${isDarkMode
-                      ? 'prose-invert prose-p:text-dark-300 prose-a:text-canopy-400'
-                      : 'prose-zinc prose-p:text-dark-700 prose-a:text-canopy-600'
+                    ? 'prose-invert prose-p:text-dark-300 prose-a:text-canopy-400'
+                    : 'prose-zinc prose-p:text-dark-700 prose-a:text-canopy-600'
                     }`}>
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm, remarkMath]}

@@ -1,8 +1,8 @@
 
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import * as d3 from 'd3';
 import { ChatNode, TreeDataNode, Project } from '../types';
-import { buildHierarchy, getAncestorPath } from '../utils/treeUtils';
+import { buildHierarchy, buildArchivedHierarchy, getAncestorPath } from '../utils/treeUtils';
 import { TreePalm, Moon, Sun, List, Network, Archive, Trash2, RotateCcw } from 'lucide-react';
 
 interface GraphViewProps {
@@ -12,17 +12,15 @@ interface GraphViewProps {
   activeNodeId: string | null;
   contextNodeIds: Set<string>;
   activePathIds: Set<string>;
-  onNodeClick: (id: string) => void;
-  onToggleContext: (id: string) => void;
-  onSelectProject: (id: string) => void;
-  onCreateProject: () => void;
-  onDeleteProject: (id: string) => void;
+  focusNodeId: string | null;
   isDarkMode: boolean;
   sidebarExpanded: boolean;
   onToggleSidebar: () => void;
   onToggleDarkMode: () => void;
   showArchived: boolean;
   onToggleShowArchived: () => void;
+  onNodeClick: (id: string) => void;
+  onToggleContext: (id: string) => void;
   onArchiveNode: (id: string) => void;
   onDeleteNode: (id: string) => void;
   onUnarchiveNode: (id: string) => void;
@@ -34,22 +32,83 @@ const GraphView: React.FC<GraphViewProps> = ({
   activeNodeId,
   contextNodeIds,
   activePathIds,
-  onNodeClick,
-  onToggleContext,
+  focusNodeId,
   isDarkMode,
   sidebarExpanded,
   onToggleSidebar,
   onToggleDarkMode,
   showArchived,
   onToggleShowArchived,
+  onNodeClick,
+  onToggleContext,
   onArchiveNode,
   onDeleteNode,
   onUnarchiveNode
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const nodePositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+  const hasInitializedRef = useRef<boolean>(false);
+  const prevProjectIdRef = useRef<string>(activeProjectId);
+  const currentTransformRef = useRef<d3.ZoomTransform | null>(null);
 
-  const treeData = useMemo(() => buildHierarchy(nodes, activeProjectId, showArchived), [nodes, activeProjectId, showArchived]);
+  const treeData = useMemo(() => {
+    if (showArchived) {
+      return buildArchivedHierarchy(nodes, activeProjectId);
+    }
+    return buildHierarchy(nodes, activeProjectId, showArchived);
+  }, [nodes, activeProjectId, showArchived]);
+
+  const archivedCount = useMemo(() => {
+    return nodes.filter(n => n.projectId === activeProjectId && n.isArchived).length;
+  }, [nodes, activeProjectId]);
+
+  // Handle resize with ResizeObserver
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) {
+        const { width, height } = entry.contentRect;
+        setContainerSize({ width, height });
+      }
+    });
+
+    resizeObserver.observe(containerRef.current);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  const focusOnNode = useCallback((nodeId: string) => {
+    if (!svgRef.current || !zoomRef.current || !containerSize.width || !containerSize.height) return;
+
+    const pos = nodePositionsRef.current.get(nodeId);
+    if (!pos) return;
+
+    const svg = d3.select(svgRef.current);
+    const scale = 1.0;
+
+    const targetX = containerSize.width / 2 - pos.x * scale;
+    const targetY = containerSize.height / 2 - pos.y * scale;
+
+    const transform = d3.zoomIdentity
+      .translate(targetX, targetY)
+      .scale(scale);
+
+    currentTransformRef.current = transform;
+    svg.transition().duration(750).ease(d3.easeCubicInOut).call(zoomRef.current.transform, transform);
+  }, [containerSize]);
+
+  useEffect(() => {
+    if (focusNodeId && sidebarExpanded) {
+      const timer = setTimeout(() => {
+        focusOnNode(focusNodeId);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [focusNodeId, focusOnNode, sidebarExpanded]);
 
   // Get path from root to active node for thin sidebar
   const pathToActive = useMemo(() => {
@@ -74,7 +133,7 @@ const GraphView: React.FC<GraphViewProps> = ({
       }
     }
     return tail;
-  }, [nodes, activeNodeId, sidebarExpanded]);
+  }, [nodes, activeNodeId, sidebarExpanded, showArchived]);
 
   const lastNodeInLinearPath = linearTail.length > 0
     ? linearTail[linearTail.length - 1]
@@ -82,10 +141,10 @@ const GraphView: React.FC<GraphViewProps> = ({
 
   // D3 Graph rendering for expanded mode
   useEffect(() => {
-    if (!sidebarExpanded || !treeData || !svgRef.current || !containerRef.current) return;
+    if (!sidebarExpanded || !treeData || !svgRef.current || containerSize.width === 0) return;
 
-    const width = containerRef.current.clientWidth;
-    const height = containerRef.current.clientHeight;
+    const width = containerSize.width;
+    const height = containerSize.height;
 
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
@@ -93,11 +152,13 @@ const GraphView: React.FC<GraphViewProps> = ({
     const g = svg.append("g");
 
     const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.1, 2])
+      .scaleExtent([0.1, 3])
       .on("zoom", (event) => {
         g.attr("transform", event.transform);
+        currentTransformRef.current = event.transform;
       });
 
+    zoomRef.current = zoom;
     svg.call(zoom);
 
     const treeLayout = d3.tree<TreeDataNode>()
@@ -106,6 +167,12 @@ const GraphView: React.FC<GraphViewProps> = ({
 
     const root = d3.hierarchy(treeData);
     const tree = treeLayout(root);
+
+    // Store node positions
+    nodePositionsRef.current.clear();
+    tree.descendants().forEach(d => {
+      nodePositionsRef.current.set(d.data.id, { x: d.x, y: d.y });
+    });
 
     const linkColor = isDarkMode ? '#27272a' : '#e4e4e7';
     const activeLinkColor = isDarkMode ? '#22c55e' : '#16a34a';
@@ -134,6 +201,7 @@ const GraphView: React.FC<GraphViewProps> = ({
       .attr("transform", d => `translate(${d.x},${d.y})`)
       .style("cursor", "pointer")
       .on("click", (event, d) => {
+        event.stopPropagation();
         if (event.shiftKey) {
           onToggleContext(d.data.id);
         } else {
@@ -226,32 +294,42 @@ const GraphView: React.FC<GraphViewProps> = ({
       });
     });
 
-    const activeNodeSelection = node.filter(d => d.data.id === activeNodeId);
-    if (!activeNodeSelection.empty()) {
-      const d = activeNodeSelection.datum();
-      const scale = 1;
-      const transform = d3.zoomIdentity
-        .translate(width / 2 - d.x * scale, height / 2 - d.y * scale)
-        .scale(scale);
-      svg.transition().duration(750).ease(d3.easeCubicInOut).call(zoom.transform, transform);
-    } else {
-      const initialScale = 0.8;
-      const initialTransform = d3.zoomIdentity
-        .translate(width / 2, 80)
-        .scale(initialScale);
-      svg.call(zoom.transform, initialTransform);
+    // Handle view initialization or project change
+    if (!hasInitializedRef.current || activeProjectId !== prevProjectIdRef.current) {
+      // Initial auto-centering on active node
+      const activeNodeSelection = node.filter(d => d.data.id === activeNodeId);
+      if (!activeNodeSelection.empty()) {
+        const d = activeNodeSelection.datum();
+        const scale = 1.0;
+        const transform = d3.zoomIdentity
+          .translate(width / 2 - d.x * scale, height / 2 - d.y * scale)
+          .scale(scale);
+        svg.transition().duration(750).ease(d3.easeCubicInOut).call(zoom.transform, transform);
+        currentTransformRef.current = transform;
+      } else {
+        const initialScale = 0.8;
+        const initialTransform = d3.zoomIdentity
+          .translate(width / 2, 80)
+          .scale(initialScale);
+        svg.call(zoom.transform, initialTransform);
+        currentTransformRef.current = initialTransform;
+      }
+      hasInitializedRef.current = true;
+      prevProjectIdRef.current = activeProjectId;
+    } else if (currentTransformRef.current) {
+      svg.call(zoom.transform, currentTransformRef.current);
     }
 
-  }, [treeData, nodes, activeNodeId, contextNodeIds, activePathIds, onNodeClick, onToggleContext, isDarkMode, sidebarExpanded]);
+  }, [treeData, nodes, activeNodeId, contextNodeIds, activePathIds, onNodeClick, onToggleContext, isDarkMode, sidebarExpanded, containerSize, activeProjectId]);
 
   // Keyboard Navigation
   useEffect(() => {
-    if (!sidebarExpanded || !activeNodeId) return;
-
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === 'INPUT') return;
+      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
+      if (!activeNodeId) return;
 
-      const currentNode = nodes.find(n => n.id === activeNodeId);
+      const projectNodes = nodes.filter(n => n.projectId === activeProjectId);
+      const currentNode = projectNodes.find(n => n.id === activeNodeId);
       if (!currentNode) return;
 
       let nextNodeId: string | null = null;
@@ -263,7 +341,7 @@ const GraphView: React.FC<GraphViewProps> = ({
           }
           break;
         case 'ArrowDown':
-          const children = nodes.filter(n => n.parentId === activeNodeId && (showArchived || !n.isArchived))
+          const children = projectNodes.filter(n => n.parentId === activeNodeId && (showArchived || !n.isArchived))
             .sort((a, b) => a.timestamp - b.timestamp);
           if (children.length > 0) {
             nextNodeId = children[0].id;
@@ -271,7 +349,7 @@ const GraphView: React.FC<GraphViewProps> = ({
           break;
         case 'ArrowLeft':
           if (currentNode.parentId) {
-            const siblings = nodes.filter(n => n.parentId === currentNode.parentId && (showArchived || !n.isArchived))
+            const siblings = projectNodes.filter(n => n.parentId === currentNode.parentId && (showArchived || !n.isArchived))
               .sort((a, b) => a.timestamp - b.timestamp);
             const index = siblings.findIndex(n => n.id === activeNodeId);
             if (index > 0) {
@@ -281,7 +359,7 @@ const GraphView: React.FC<GraphViewProps> = ({
           break;
         case 'ArrowRight':
           if (currentNode.parentId) {
-            const siblings = nodes.filter(n => n.parentId === currentNode.parentId && (showArchived || !n.isArchived))
+            const siblings = projectNodes.filter(n => n.parentId === currentNode.parentId && (showArchived || !n.isArchived))
               .sort((a, b) => a.timestamp - b.timestamp);
             const index = siblings.findIndex(n => n.id === activeNodeId);
             if (index !== -1 && index < siblings.length - 1) {
@@ -299,7 +377,7 @@ const GraphView: React.FC<GraphViewProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [sidebarExpanded, activeNodeId, nodes, onNodeClick]);
+  }, [activeNodeId, nodes, onNodeClick, activeProjectId, showArchived]);
 
   const renderListItem = (node: ChatNode) => {
     const isActive = node.id === activeNodeId;
@@ -406,12 +484,17 @@ const GraphView: React.FC<GraphViewProps> = ({
           </button>
           <button
             onClick={onToggleShowArchived}
-            className={`p-1.5 rounded-lg transition-colors ${showArchived
+            className={`p-1.5 rounded-lg transition-all relative ${showArchived
               ? (isDarkMode ? 'bg-amber-500/20 text-amber-500' : 'bg-amber-100 text-amber-600')
               : (isDarkMode ? 'hover:bg-dark-800 text-dark-400' : 'hover:bg-canopy-50 text-dark-400')}`}
             title={showArchived ? 'Hide Archived' : 'Show Archived'}
           >
             <Archive className="w-4 h-4" />
+            {archivedCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[8px] font-bold px-1 rounded-full min-w-[14px] h-[14px] flex items-center justify-center border-2 border-white dark:border-dark-950">
+                {archivedCount}
+              </span>
+            )}
           </button>
         </div>
       </div>
