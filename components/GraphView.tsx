@@ -1,50 +1,9 @@
 
-import React, { useEffect, useRef, useMemo, useState } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import * as d3 from 'd3';
 import { ChatNode, TreeDataNode, Project } from '../types';
-import { buildHierarchy, getChildCount } from '../utils/treeUtils';
-import { Plus, X, TreePine } from 'lucide-react';
-
-// Helper function to wrap text into multiple lines
-function wrapText(text: string, maxChars: number, maxLines: number): string[] {
-  const words = text.split(' ');
-  const lines: string[] = [];
-  let currentLine = '';
-
-  for (const word of words) {
-    if (lines.length >= maxLines) break;
-    
-    const testLine = currentLine ? `${currentLine} ${word}` : word;
-    if (testLine.length <= maxChars) {
-      currentLine = testLine;
-    } else {
-      if (currentLine) {
-        lines.push(currentLine);
-        currentLine = word;
-      } else {
-        // Word is longer than maxChars, truncate it
-        lines.push(word.substring(0, maxChars - 3) + '...');
-        currentLine = '';
-      }
-    }
-  }
-
-  if (currentLine && lines.length < maxLines) {
-    lines.push(currentLine);
-  }
-
-  // Add ellipsis to last line if text was truncated
-  if (lines.length === maxLines && words.length > lines.join(' ').split(' ').length) {
-    const lastLine = lines[maxLines - 1];
-    if (lastLine.length > maxChars - 3) {
-      lines[maxLines - 1] = lastLine.substring(0, maxChars - 3) + '...';
-    } else {
-      lines[maxLines - 1] = lastLine + '...';
-    }
-  }
-
-  return lines;
-}
+import { buildHierarchy, getAncestorPath } from '../utils/treeUtils';
+import { TreePalm, Moon, Sun, List, Network, Archive, Trash2, RotateCcw } from 'lucide-react';
 
 interface GraphViewProps {
   nodes: ChatNode[];
@@ -58,35 +17,72 @@ interface GraphViewProps {
   onSelectProject: (id: string) => void;
   onCreateProject: () => void;
   onDeleteProject: (id: string) => void;
-}
-
-interface TooltipData {
-  x: number;
-  y: number;
-  node: ChatNode;
+  isDarkMode: boolean;
+  sidebarExpanded: boolean;
+  onToggleSidebar: () => void;
+  onToggleDarkMode: () => void;
+  showArchived: boolean;
+  onToggleShowArchived: () => void;
+  onArchiveNode: (id: string) => void;
+  onDeleteNode: (id: string) => void;
+  onUnarchiveNode: (id: string) => void;
 }
 
 const GraphView: React.FC<GraphViewProps> = ({
   nodes,
-  projects,
   activeProjectId,
   activeNodeId,
   contextNodeIds,
   activePathIds,
   onNodeClick,
   onToggleContext,
-  onSelectProject,
-  onCreateProject,
-  onDeleteProject
+  isDarkMode,
+  sidebarExpanded,
+  onToggleSidebar,
+  onToggleDarkMode,
+  showArchived,
+  onToggleShowArchived,
+  onArchiveNode,
+  onDeleteNode,
+  onUnarchiveNode
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [tooltip, setTooltip] = useState<TooltipData | null>(null);
 
-  const treeData = useMemo(() => buildHierarchy(nodes, activeProjectId), [nodes, activeProjectId]);
+  const treeData = useMemo(() => buildHierarchy(nodes, activeProjectId, showArchived), [nodes, activeProjectId, showArchived]);
 
+  // Get path from root to active node for thin sidebar
+  const pathToActive = useMemo(() => {
+    if (!activeNodeId) return [];
+    return getAncestorPath(nodes, activeNodeId);
+  }, [nodes, activeNodeId]);
+
+  // Get linear tail from active node until ambiguity
+  const linearTail = useMemo(() => {
+    if (!activeNodeId || sidebarExpanded) return [];
+
+    const tail: ChatNode[] = [];
+    let currentId = activeNodeId;
+
+    while (true) {
+      const children = nodes.filter(n => n.parentId === currentId && (showArchived || !n.isArchived));
+      if (children.length === 1) {
+        tail.push(children[0]);
+        currentId = children[0].id;
+      } else {
+        break;
+      }
+    }
+    return tail;
+  }, [nodes, activeNodeId, sidebarExpanded]);
+
+  const lastNodeInLinearPath = linearTail.length > 0
+    ? linearTail[linearTail.length - 1]
+    : nodes.find(n => n.id === activeNodeId);
+
+  // D3 Graph rendering for expanded mode
   useEffect(() => {
-    if (!treeData || !svgRef.current || !containerRef.current) return;
+    if (!sidebarExpanded || !treeData || !svgRef.current || !containerRef.current) return;
 
     const width = containerRef.current.clientWidth;
     const height = containerRef.current.clientHeight;
@@ -105,25 +101,32 @@ const GraphView: React.FC<GraphViewProps> = ({
     svg.call(zoom);
 
     const treeLayout = d3.tree<TreeDataNode>()
-      .nodeSize([280, 220])
-      .separation((a, b) => a.parent === b.parent ? 1.4 : 1.8);
+      .nodeSize([180, 100])
+      .separation((a, b) => a.parent === b.parent ? 1.2 : 1.4);
 
     const root = d3.hierarchy(treeData);
     const tree = treeLayout(root);
 
-    // Links
+    const linkColor = isDarkMode ? '#27272a' : '#e4e4e7';
+    const activeLinkColor = isDarkMode ? '#22c55e' : '#16a34a';
+    const textColor = isDarkMode ? '#a1a1aa' : '#52525b';
+    const activeTextColor = isDarkMode ? '#4ade80' : '#15803d';
+    const hoverGlow = isDarkMode ? 'rgba(74, 222, 128, 0.2)' : 'rgba(34, 197, 94, 0.15)';
+
+    const linkGenerator = d3.linkVertical<any, any>()
+      .x(d => d.x)
+      .y(d => d.y);
+
     g.append("g")
       .attr("fill", "none")
-      .attr("stroke", "#86efac")
       .attr("stroke-width", 2)
       .selectAll("path")
       .data(tree.links())
       .join("path")
-      .attr("d", d3.linkVertical<any, any>()
-        .x(d => d.x)
-        .y(d => d.y));
+      .attr("stroke", d => activePathIds.has(d.target.data.id) ? activeLinkColor : linkColor)
+      .attr("opacity", d => activePathIds.has(d.target.data.id) ? 1 : 0.6)
+      .attr("d", linkGenerator);
 
-    // Nodes
     const node = g.append("g")
       .selectAll("g")
       .data(tree.descendants())
@@ -136,280 +139,327 @@ const GraphView: React.FC<GraphViewProps> = ({
         } else {
           onNodeClick(d.data.id);
         }
-      })
-      .on("mouseenter", function(event, d) {
-        const isManualContext = contextNodeIds.has(d.data.id);
-        const isInActivePath = activePathIds.has(d.data.id);
-        const isInContext = isManualContext || isInActivePath;
-        if (!isInContext) {
-          const rect = containerRef.current?.getBoundingClientRect();
-          if (rect) {
-            setTooltip({
-              x: event.clientX - rect.left,
-              y: event.clientY - rect.top,
-              node: d.data.data
-            });
-          }
-        }
-      })
-      .on("mouseleave", function() {
-        setTooltip(null);
       });
 
-    // Determine node appearance based on context
-    node.each(function(d) {
+    node.each(function (d) {
       const el = d3.select(this);
-      const isManualContext = contextNodeIds.has(d.data.id);
-      const isInActivePath = activePathIds.has(d.data.id);
-      const isInContext = isManualContext || isInActivePath;
       const isActive = d.data.id === activeNodeId;
-      const children = getChildCount(nodes, d.data.id);
+      const isInPath = activePathIds.has(d.data.id);
+      const isInContext = contextNodeIds.has(d.data.id);
+
+      const text = d.data.name || 'New';
+      const maxCharWidth = 160;
+      const words = text.split(/\s+/);
+      const lines: string[] = [];
+      let currentLine = "";
+
+      words.forEach(word => {
+        const testLine = currentLine ? `${currentLine} ${word}` : word;
+        if (testLine.length * 7.5 > maxCharWidth && currentLine) {
+          lines.push(currentLine);
+          currentLine = word;
+        } else {
+          currentLine = testLine;
+        }
+      });
+      if (currentLine) lines.push(currentLine);
+
+      const displayLines = lines.slice(0, 3);
+      if (lines.length > 3) displayLines[2] = displayLines[2].substring(0, displayLines[2].length - 3) + "...";
+
+      const lineHeight = 18;
+      const rectPaddingX = 28;
+      const rectPaddingY = 14;
+      const rectHeight = Math.max(32, (displayLines.length * lineHeight) + rectPaddingY);
+      const textWidth = Math.max(...displayLines.map(l => l.length * 7.5)) + rectPaddingX;
+
+      const rect = el.append("rect")
+        .attr("x", -textWidth / 2)
+        .attr("y", -rectHeight / 2)
+        .attr("width", textWidth)
+        .attr("height", rectHeight)
+        .attr("rx", 12)
+        .attr("ry", 12)
+        .attr("fill", isDarkMode ? '#18181b' : '#ffffff')
+        .attr("stroke", isActive ? activeTextColor : isInPath ? activeLinkColor : linkColor)
+        .attr("stroke-width", isActive ? 2 : 1.5)
+        .attr("class", "node-pill")
+        .style("filter", isActive ? `drop-shadow(0 0 8px ${hoverGlow})` : "none");
+
+      const textEl = el.append("text")
+        .attr("text-anchor", "middle")
+        .attr("fill", isActive ? activeTextColor : isInPath ? activeLinkColor : textColor)
+        .style("font-size", "13px")
+        .style("font-weight", isActive ? "600" : "500")
+        .style("pointer-events", "none");
+
+      displayLines.forEach((line, i) => {
+        textEl.append("tspan")
+          .attr("x", 0)
+          .attr("dy", i === 0
+            ? -(displayLines.length - 1) * lineHeight / 2 + 4
+            : lineHeight
+          )
+          .text(line);
+      });
 
       if (isInContext) {
-        // Large expanded card for context nodes (like the screenshot)
-        const cardWidth = 220;
-        const cardHeight = 140;
-
-        // Main card background
-        el.append("rect")
-          .attr("x", -cardWidth / 2)
-          .attr("y", -cardHeight / 2)
-          .attr("width", cardWidth)
-          .attr("height", cardHeight)
-          .attr("rx", 12)
-          .attr("fill", "white")
-          .attr("stroke", isActive ? "#16a34a" : "#86efac")
-          .attr("stroke-width", isActive ? 3 : 1.5)
-          .style("filter", "drop-shadow(0 4px 12px rgba(0, 0, 0, 0.08))");
-
-        // Top connector line (dashed)
-        el.append("line")
-          .attr("x1", 0)
-          .attr("y1", -cardHeight / 2 - 15)
-          .attr("x2", 0)
-          .attr("y2", -cardHeight / 2)
-          .attr("stroke", "#86efac")
-          .attr("stroke-width", 2)
-          .attr("stroke-dasharray", "4,4");
-
-        // Title row with icon and star
-        el.append("rect")
-          .attr("x", -cardWidth / 2 + 12)
-          .attr("y", -cardHeight / 2 + 12)
-          .attr("width", 20)
-          .attr("height", 20)
-          .attr("rx", 4)
-          .attr("fill", "#dcfce7");
-
-        el.append("text")
-          .attr("x", -cardWidth / 2 + 22)
-          .attr("y", -cardHeight / 2 + 26)
-          .attr("text-anchor", "middle")
-          .attr("fill", "#22c55e")
-          .style("font-size", "12px")
-          .text("💬");
-
-        // Title text
-        el.append("text")
-          .attr("x", -cardWidth / 2 + 40)
-          .attr("y", -cardHeight / 2 + 27)
-          .attr("fill", "#166534")
-          .style("font-size", "13px")
-          .style("font-weight", "600")
-          .text(() => {
-            const text = d.data.name;
-            return text.length > 20 ? text.substring(0, 17) + "..." : text;
-          });
-
-        // Star indicator for active context
-        el.append("text")
-          .attr("x", cardWidth / 2 - 20)
-          .attr("y", -cardHeight / 2 + 27)
-          .attr("text-anchor", "middle")
-          .attr("fill", "#fbbf24")
-          .style("font-size", "14px")
-          .text("★");
-
-        // Question section
-        el.append("text")
-          .attr("x", -cardWidth / 2 + 12)
-          .attr("y", -cardHeight / 2 + 50)
-          .attr("fill", "#6b7280")
-          .style("font-size", "10px")
-          .style("font-weight", "500")
-          .text("Question");
-
-        // Question content (multi-line)
-        const questionText = d.data.data.userPrompt;
-        const questionLines = wrapText(questionText, 32, 2);
-        questionLines.forEach((line, i) => {
-          el.append("text")
-            .attr("x", -cardWidth / 2 + 12)
-            .attr("y", -cardHeight / 2 + 64 + (i * 12))
-            .attr("fill", "#1f2937")
-            .style("font-size", "11px")
-            .text(line);
-        });
-
-        // Divider line
-        el.append("line")
-          .attr("x1", -cardWidth / 2 + 12)
-          .attr("y1", -cardHeight / 2 + 90)
-          .attr("x2", cardWidth / 2 - 12)
-          .attr("y2", -cardHeight / 2 + 90)
-          .attr("stroke", "#e5e7eb")
-          .attr("stroke-width", 1);
-
-        // Answer section
-        el.append("text")
-          .attr("x", -cardWidth / 2 + 12)
-          .attr("y", -cardHeight / 2 + 105)
-          .attr("fill", "#6b7280")
-          .style("font-size", "10px")
-          .style("font-weight", "500")
-          .text("Answer");
-
-        // Answer content (multi-line)
-        const answerText = d.data.data.assistantResponse;
-        const answerLines = wrapText(answerText, 32, 2);
-        answerLines.forEach((line, i) => {
-          el.append("text")
-            .attr("x", -cardWidth / 2 + 12)
-            .attr("y", -cardHeight / 2 + 119 + (i * 12))
-            .attr("fill", "#1f2937")
-            .style("font-size", "11px")
-            .text(line);
-        });
-
-      } else {
-        // Small faded dot for non-context nodes
         el.append("circle")
-          .attr("cx", 0)
-          .attr("cy", 0)
-          .attr("r", isActive ? 10 : 6)
-          .attr("fill", () => {
-            if (isActive) return "#4ade80";
-            if (children > 1) return "#86efac";
-            return "#bbf7d0";
-          })
-          .attr("stroke", isActive ? "#16a34a" : "transparent")
-          .attr("stroke-width", isActive ? 2 : 0)
-          .attr("opacity", isActive ? 1 : 0.6);
-
-        // Small label only for active node
-        if (isActive) {
-          el.append("text")
-            .attr("dy", 20)
-            .attr("text-anchor", "middle")
-            .attr("fill", "#166534")
-            .style("font-size", "9px")
-            .style("font-weight", "500")
-            .text(() => {
-              const text = d.data.name;
-              return text.length > 12 ? text.substring(0, 9) + "..." : text;
-            });
-        }
+          .attr("cx", textWidth / 2)
+          .attr("cy", -rectHeight / 2)
+          .attr("r", 5)
+          .attr("fill", activeTextColor)
+          .attr("stroke", isDarkMode ? '#09090b' : '#ffffff')
+          .attr("stroke-width", 2);
       }
+
+      el.on("mouseenter", function () {
+        rect.transition().duration(200)
+          .attr("stroke", activeTextColor)
+          .attr("stroke-width", 2.5);
+        if (isDarkMode) rect.style("fill", "#27272a");
+      }).on("mouseleave", function () {
+        rect.transition().duration(200)
+          .attr("stroke", isActive ? activeTextColor : isInPath ? activeLinkColor : linkColor)
+          .attr("stroke-width", isActive ? 2 : 1.5);
+        if (isDarkMode) rect.style("fill", "#18181b");
+      });
     });
 
-    // Center the graph
-    const initialScale = 0.85;
-    const initialTransform = d3.zoomIdentity
-      .translate(width / 2, 80)
-      .scale(initialScale);
+    const activeNodeSelection = node.filter(d => d.data.id === activeNodeId);
+    if (!activeNodeSelection.empty()) {
+      const d = activeNodeSelection.datum();
+      const scale = 1;
+      const transform = d3.zoomIdentity
+        .translate(width / 2 - d.x * scale, height / 2 - d.y * scale)
+        .scale(scale);
+      svg.transition().duration(750).ease(d3.easeCubicInOut).call(zoom.transform, transform);
+    } else {
+      const initialScale = 0.8;
+      const initialTransform = d3.zoomIdentity
+        .translate(width / 2, 80)
+        .scale(initialScale);
+      svg.call(zoom.transform, initialTransform);
+    }
 
-    svg.call(zoom.transform, initialTransform);
+  }, [treeData, nodes, activeNodeId, contextNodeIds, activePathIds, onNodeClick, onToggleContext, isDarkMode, sidebarExpanded]);
 
-  }, [treeData, nodes, activeNodeId, contextNodeIds, activePathIds, onNodeClick, onToggleContext]);
+  // Keyboard Navigation
+  useEffect(() => {
+    if (!sidebarExpanded || !activeNodeId) return;
 
-  return (
-    <div className="h-full flex flex-col bg-green-50">
-      {/* Header with Logo */}
-      <div className="px-4 py-3 border-b border-green-200 bg-white flex items-center gap-2">
-        <TreePine className="w-5 h-5 text-green-600" />
-        <span className="font-bold text-green-800">Canopy</span>
-      </div>
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).tagName === 'INPUT') return;
 
-      {/* Project Tabs */}
-      <div className="flex items-center gap-1 px-2 py-2 border-b border-green-200 bg-white overflow-x-auto">
-        {projects.map(project => (
-          <button
-            key={project.id}
-            onClick={() => onSelectProject(project.id)}
-            className={`group flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-              activeProjectId === project.id
-                ? 'bg-green-100 text-green-700'
-                : 'text-green-500 hover:bg-green-50 hover:text-green-600'
-            }`}
-          >
-            <span>{project.icon}</span>
-            <span>{project.name}</span>
-            {projects.length > 1 && (
-              <X
-                className="w-3 h-3 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-opacity"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDeleteProject(project.id);
-                }}
-              />
-            )}
-          </button>
-        ))}
+      const currentNode = nodes.find(n => n.id === activeNodeId);
+      if (!currentNode) return;
+
+      let nextNodeId: string | null = null;
+
+      switch (e.key) {
+        case 'ArrowUp':
+          if (currentNode.parentId) {
+            nextNodeId = currentNode.parentId;
+          }
+          break;
+        case 'ArrowDown':
+          const children = nodes.filter(n => n.parentId === activeNodeId && (showArchived || !n.isArchived))
+            .sort((a, b) => a.timestamp - b.timestamp);
+          if (children.length > 0) {
+            nextNodeId = children[0].id;
+          }
+          break;
+        case 'ArrowLeft':
+          if (currentNode.parentId) {
+            const siblings = nodes.filter(n => n.parentId === currentNode.parentId && (showArchived || !n.isArchived))
+              .sort((a, b) => a.timestamp - b.timestamp);
+            const index = siblings.findIndex(n => n.id === activeNodeId);
+            if (index > 0) {
+              nextNodeId = siblings[index - 1].id;
+            }
+          }
+          break;
+        case 'ArrowRight':
+          if (currentNode.parentId) {
+            const siblings = nodes.filter(n => n.parentId === currentNode.parentId && (showArchived || !n.isArchived))
+              .sort((a, b) => a.timestamp - b.timestamp);
+            const index = siblings.findIndex(n => n.id === activeNodeId);
+            if (index !== -1 && index < siblings.length - 1) {
+              nextNodeId = siblings[index + 1].id;
+            }
+          }
+          break;
+      }
+
+      if (nextNodeId) {
+        e.preventDefault();
+        onNodeClick(nextNodeId);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [sidebarExpanded, activeNodeId, nodes, onNodeClick]);
+
+  const renderListItem = (node: ChatNode) => {
+    const isActive = node.id === activeNodeId;
+    const isInContext = contextNodeIds.has(node.id);
+    const children = nodes.filter(n => n.parentId === node.id && (showArchived || !n.isArchived));
+    const childCount = children.length;
+
+    return (
+      <div key={node.id}>
         <button
-          onClick={onCreateProject}
-          className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-green-400 hover:text-green-600 hover:bg-green-50 transition-colors"
+          onClick={(e) => {
+            if (e.shiftKey) {
+              onToggleContext(node.id);
+            } else {
+              onNodeClick(node.id);
+            }
+          }}
+          className={`sidebar-item group w-full text-left px-3 py-1.5 rounded-md text-xs flex items-center justify-between gap-3 transition-all ${isActive
+            ? isDarkMode
+              ? 'bg-dark-800 text-canopy-400 border-l-2 border-canopy-500'
+              : 'bg-canopy-50 text-canopy-700 border-l-2 border-canopy-500'
+            : isDarkMode
+              ? 'text-dark-400 hover:bg-dark-800/50 hover:text-dark-300'
+              : 'text-dark-500 hover:bg-white/50 hover:text-dark-700'
+            }`}
         >
-          <Plus className="w-4 h-4" />
+          <div className="flex items-center gap-1.5 overflow-hidden min-w-0">
+            <span className={`truncate font-medium ${node.isArchived ? 'opacity-50 italic' : ''}`}>
+              {node.summary || 'New conversation'}
+            </span>
+            {childCount > 1 && (
+              <span className={`text-[9px] px-1 rounded-sm flex-shrink-0 ${isDarkMode
+                ? 'bg-dark-700 text-dark-300'
+                : 'bg-white text-dark-400 border border-canopy-100'
+                }`}>
+                {childCount}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <span className={`text-[10px] tabular-nums ${isDarkMode ? 'text-dark-600' : 'text-zinc-400'}`}>
+              {new Date(node.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase()}
+            </span>
+            {isInContext && (
+              <span className={`w-1.5 h-1.5 rounded-full ${isDarkMode ? 'bg-canopy-400' : 'bg-canopy-500'}`} />
+            )}
+
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-1">
+              {node.isArchived ? (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onUnarchiveNode(node.id); }}
+                  className={`p-1 rounded transition-colors ${isDarkMode ? 'hover:bg-dark-700 text-dark-400' : 'hover:bg-canopy-100 text-dark-500'}`}
+                  title="Unarchive"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                </button>
+              ) : (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onArchiveNode(node.id); }}
+                  className={`p-1 rounded transition-colors ${isDarkMode ? 'hover:bg-dark-700 text-dark-400' : 'hover:bg-canopy-100 text-dark-500'}`}
+                  title="Archive"
+                >
+                  <Archive className="w-3 h-3" />
+                </button>
+              )}
+              <button
+                onClick={(e) => { e.stopPropagation(); onDeleteNode(node.id); }}
+                className={`p-1 rounded transition-colors ${isDarkMode ? 'hover:bg-red-900/30 text-red-500' : 'hover:bg-red-50 text-red-500'}`}
+                title="Delete"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
         </button>
       </div>
+    );
+  };
 
-      {/* Graph Area */}
+  return (
+    <div className={`h-full flex flex-col ${isDarkMode ? 'bg-dark-950' : 'bg-white'}`}>
+      <div className={`px-4 py-3 border-b flex items-center justify-between ${isDarkMode ? 'border-dark-800 bg-dark-950' : 'border-canopy-100 bg-white'}`}>
+        <div className="flex items-center gap-2">
+          <div className={`p-1 rounded-md ${isDarkMode ? 'bg-canopy-500/10' : 'bg-canopy-50'}`}>
+            <TreePalm className={`w-4 h-4 ${isDarkMode ? 'text-canopy-400' : 'text-canopy-600'}`} />
+          </div>
+          <span className={`font-bold text-sm tracking-tight ${isDarkMode ? 'text-dark-100' : 'text-dark-900'}`}>Canopy</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onToggleDarkMode}
+            className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-dark-800 text-dark-400 hover:text-dark-200' : 'hover:bg-canopy-50 text-dark-400 hover:text-dark-600'}`}
+            title={isDarkMode ? 'Light mode' : 'Dark mode'}
+          >
+            {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
+          <button
+            onClick={onToggleSidebar}
+            className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-dark-800 text-dark-400 hover:text-dark-200' : 'hover:bg-canopy-50 text-dark-400 hover:text-dark-600'}`}
+            title={sidebarExpanded ? 'Switch to List' : 'Switch to Graph'}
+          >
+            {sidebarExpanded ? <List className="w-4 h-4" /> : <Network className="w-4 h-4" />}
+          </button>
+          <button
+            onClick={onToggleShowArchived}
+            className={`p-1.5 rounded-lg transition-colors ${showArchived
+              ? (isDarkMode ? 'bg-amber-500/20 text-amber-500' : 'bg-amber-100 text-amber-600')
+              : (isDarkMode ? 'hover:bg-dark-800 text-dark-400' : 'hover:bg-canopy-50 text-dark-400')}`}
+            title={showArchived ? 'Hide Archived' : 'Show Archived'}
+          >
+            <Archive className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
       <div ref={containerRef} className="flex-1 relative overflow-hidden">
         {!treeData && (
-          <div className="absolute inset-0 flex items-center justify-center text-green-400">
-            Empty project. Start a conversation.
-          </div>
-        )}
-        <svg ref={svgRef} className="w-full h-full" />
-
-        {/* Tooltip */}
-        {tooltip && (
-          <div
-            className="absolute z-50 bg-white border border-green-200 rounded-lg shadow-lg p-3 max-w-xs pointer-events-none"
-            style={{
-              left: tooltip.x + 10,
-              top: tooltip.y + 10,
-              transform: tooltip.x > (containerRef.current?.clientWidth || 0) / 2 ? 'translateX(-100%)' : undefined
-            }}
-          >
-            <div className="text-xs font-semibold text-green-700 mb-1 truncate">
-              {tooltip.node.summary}
-            </div>
-            <div className="text-[10px] text-green-600 mb-2">
-              <span className="font-medium">Q:</span> {tooltip.node.userPrompt.slice(0, 80)}...
-            </div>
-            <div className="text-[10px] text-green-500">
-              <span className="font-medium">A:</span> {tooltip.node.assistantResponse.slice(0, 100)}...
-            </div>
-            <div className="text-[9px] text-green-400 mt-2 border-t border-green-100 pt-1">
-              Click to select • Shift+click to add to context
-            </div>
+          <div className={`absolute inset-0 flex items-center justify-center text-sm ${isDarkMode ? 'text-dark-500' : 'text-dark-400'}`}>
+            Start a conversation
           </div>
         )}
 
-        {/* Legend */}
-        <div className="absolute bottom-3 left-3 bg-white/90 border border-green-200 rounded-lg px-3 py-2 text-[10px] text-green-600">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded bg-white border-2 border-green-400"></div>
-              <span>In Context</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-1.5 h-1.5 rounded-full bg-green-300 opacity-60"></div>
-              <span>Condensed</span>
-            </div>
+        {!sidebarExpanded && treeData && (
+          <div className={`h-full overflow-y-auto py-2 px-2 custom-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:none]`}>
+            {pathToActive.length === 0 ? (
+              <div className={`text-xs text-center ${isDarkMode ? 'text-dark-400' : 'text-zinc-400'}`}>
+                No active conversation
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                {pathToActive.map(renderListItem)}
+                {linearTail.map(renderListItem)}
+                {(() => {
+                  if (!lastNodeInLinearPath) return null;
+                  const allChildren = nodes.filter(n => n.parentId === lastNodeInLinearPath.id);
+                  const displayChildren = allChildren
+                    .filter(n => showArchived || !n.isArchived)
+                    .sort((a, b) => a.timestamp - b.timestamp);
+
+                  if (displayChildren.length > 0) {
+                    return (
+                      <div className={`mt-2 ml-4 pl-2 border-l ${isDarkMode ? 'border-dark-800' : 'border-canopy-100'}`}>
+                        <div className={`text-[10px] uppercase tracking-wider mb-1 pl-2 ${isDarkMode ? 'text-dark-500' : 'text-zinc-400'}`}>
+                          Responses
+                        </div>
+                        {displayChildren.map(renderListItem)}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+            )}
           </div>
-        </div>
+        )}
+
+        {sidebarExpanded && (
+          <svg ref={svgRef} className="w-full h-full" />
+        )}
       </div>
     </div>
   );

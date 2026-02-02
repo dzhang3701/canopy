@@ -66,7 +66,7 @@ export async function generateChatResponse(
         {
           role: 'user',
           parts: [{
-            text: `Summarize the following user question in exactly one concise phrase (max 5 words), capturing the main topic:
+            text: `Summarize the following user question in exactly one concise phrase (max 8 words), capturing the main topic:
             "${newPrompt}"`
           }]
         }
@@ -104,7 +104,7 @@ export async function generateChatResponse(
       {
         role: 'user',
         parts: [{
-          text: `Summarize the following interaction in exactly one concise phrase (max 5 words):
+          text: `Summarize the following interaction in exactly one concise phrase (max 8 words):
           User: ${newPrompt}
           Assistant: ${assistantText}`
         }]

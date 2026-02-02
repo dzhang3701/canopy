@@ -1,18 +1,28 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle, ImperativePanelHandle } from 'react-resizable-panels';
 import { ChatNode, Project } from './types';
 import ChatView from './components/ChatView';
 import GraphView from './components/GraphView';
+import NodeActionModal, { ActionType } from './components/NodeActionModal';
 import { generateChatResponse, streamChatResponse } from './services/geminiService';
-import { getAncestorPath } from './utils/treeUtils';
-import { Send, Loader2, Sparkles, GripVertical } from 'lucide-react';
+import {
+  getAncestorPath,
+  deleteNodeOnly,
+  deleteNodeWithChildren,
+  archiveNodeOnly,
+  archiveNodeWithChildren,
+  unarchiveNodeWithChildren,
+  archiveChildrenOnly,
+  deleteChildrenOnly
+} from './utils/treeUtils';
+import { Send, Loader2, Sparkles, GripVertical, Moon, Sun } from 'lucide-react';
 
 const STARTER_PROJECTS: Project[] = [
-  { id: 'p1', name: 'Exploration', icon: '🚀', createdAt: Date.now() },
-  { id: 'p2', name: 'Problem Solving', icon: '🧩', createdAt: Date.now() },
-  { id: 'p3', name: 'Class Notes', icon: '📝', createdAt: Date.now() },
+  { id: 'p1', name: 'Exploration', createdAt: Date.now() },
+  { id: 'p2', name: 'Problem Solving', createdAt: Date.now() },
+  { id: 'p3', name: 'Class Notes', createdAt: Date.now() },
 ];
 
 const App: React.FC = () => {
@@ -42,6 +52,48 @@ const App: React.FC = () => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [streamingResponse, setStreamingResponse] = useState('');
+
+  // UI State
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const saved = localStorage.getItem('canopy_dark_mode');
+    return saved ? JSON.parse(saved) : false;
+  });
+  const [sidebarExpanded, setSidebarExpanded] = useState(() => {
+    const saved = localStorage.getItem('canopy_sidebar_expanded');
+    return saved ? JSON.parse(saved) : false;
+  });
+
+  const [showArchived, setShowArchived] = useState(false);
+
+  const [modalState, setModalState] = useState<{
+    isOpen: boolean;
+    actionType: ActionType;
+    nodeId: string;
+    isRootNode: boolean;
+    hasChildren: boolean;
+    nodeSummary: string;
+  }>({
+    isOpen: false,
+    actionType: 'archive',
+    nodeId: '',
+    isRootNode: false,
+    hasChildren: false,
+    nodeSummary: '',
+  });
+
+  // Dark mode effect
+  useEffect(() => {
+    localStorage.setItem('canopy_dark_mode', JSON.stringify(isDarkMode));
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
+
+  useEffect(() => {
+    localStorage.setItem('canopy_sidebar_expanded', JSON.stringify(sidebarExpanded));
+  }, [sidebarExpanded]);
 
   // Persistence
   useEffect(() => {
@@ -104,6 +156,22 @@ const App: React.FC = () => {
     setIsLoading(true);
     setStreamingResponse('');
 
+    // Create node immediately with "Generating..." summary
+    const newNode: ChatNode = {
+      id: newNodeId,
+      parentId: activeNodeId,
+      projectId: activeProjectId,
+      summary: 'Generating...',
+      userPrompt: promptText,
+      assistantResponse: '',
+      timestamp: Date.now(),
+      isArchived: false,
+      isCollapsed: false
+    };
+
+    setNodes(prev => [...prev, newNode]);
+    setActiveNodeId(newNode.id);
+
     try {
       const history = contextPath.length > 0 ? contextPath : activePath;
 
@@ -116,21 +184,13 @@ const App: React.FC = () => {
       // Generate summary after streaming completes
       const { summary } = await generateChatResponse(history, promptText, true);
 
-      // Create node immediately with empty response
-      const newNode: ChatNode = {
-        id: newNodeId,
-        parentId: activeNodeId,
-        projectId: activeProjectId,
-        summary: 'Generating...',
-        userPrompt: promptText,
-        assistantResponse: fullResponse,
-        timestamp: Date.now(),
-        isArchived: false,
-        isCollapsed: false
-      };
+      // Update the node with the full response and the real summary
+      setNodes(prev => prev.map(n =>
+        n.id === newNodeId
+          ? { ...n, assistantResponse: fullResponse, summary: summary }
+          : n
+      ));
 
-      setNodes(prev => [...prev, newNode]);
-      setActiveNodeId(newNode.id);
       setStreamingResponse('');
     } catch (error) {
       console.error("Failed to generate response:", error);
@@ -148,7 +208,6 @@ const App: React.FC = () => {
       const newProject: Project = {
         id: uuidv4(),
         name,
-        icon: '📁',
         createdAt: Date.now()
       };
       setProjects(prev => [...prev, newProject]);
@@ -190,11 +249,134 @@ const App: React.FC = () => {
     setActiveNodeId(id);
   };
 
+  const handleArchiveNode = (id: string) => {
+    const node = nodes.find(n => n.id === id);
+    if (!node) return;
+
+    const children = nodes.filter(n => n.parentId === id && !n.isArchived);
+    setModalState({
+      isOpen: true,
+      actionType: 'archive',
+      nodeId: id,
+      isRootNode: node.parentId === null,
+      hasChildren: children.length > 0,
+      nodeSummary: node.summary,
+    });
+  };
+
+  const handleDeleteNode = (id: string) => {
+    const node = nodes.find(n => n.id === id);
+    if (!node) return;
+
+    const children = nodes.filter(n => n.parentId === id && !n.isArchived);
+    setModalState({
+      isOpen: true,
+      actionType: 'delete',
+      nodeId: id,
+      isRootNode: node.parentId === null,
+      hasChildren: children.length > 0,
+      nodeSummary: node.summary,
+    });
+  };
+
+  const handleUnarchiveNode = (id: string) => {
+    const node = nodes.find(n => n.id === id);
+    if (!node) return;
+
+    setModalState({
+      isOpen: true,
+      actionType: 'unarchive',
+      nodeId: id,
+      isRootNode: node.parentId === null,
+      hasChildren: false,
+      nodeSummary: node.summary,
+    });
+  };
+
+  const handleModalCancel = () => {
+    setModalState(prev => ({ ...prev, isOpen: false }));
+  };
+
+  const handleModalConfirm = (includeChildren: boolean, deleteAll?: boolean) => {
+    const { actionType, nodeId } = modalState;
+
+    if (actionType === 'unarchive') {
+      const updatedNodes = unarchiveNodeWithChildren(nodes, nodeId);
+      setNodes(updatedNodes);
+    } else if (actionType === 'delete') {
+      if (deleteAll && modalState.isRootNode) {
+        // Delete entire project
+        setNodes(nodes.filter(n => n.projectId !== activeProjectId));
+        setActiveNodeId(null);
+      } else if (modalState.isRootNode && !deleteAll) {
+        const result = deleteChildrenOnly(nodes, nodeId, activeNodeId);
+        setNodes(result.updatedNodes);
+        setActiveNodeId(result.newActiveNodeId);
+      } else if (includeChildren) {
+        const result = deleteNodeWithChildren(nodes, nodeId, activeNodeId);
+        setNodes(result.updatedNodes);
+        setActiveNodeId(result.newActiveNodeId);
+      } else {
+        const result = deleteNodeOnly(nodes, nodeId, activeNodeId);
+        setNodes(result.updatedNodes);
+        setActiveNodeId(result.newActiveNodeId);
+      }
+    } else if (actionType === 'archive') {
+      if (deleteAll && modalState.isRootNode) {
+        // Archive entire project nodes
+        const updatedNodes = nodes.map(n => n.projectId === activeProjectId ? { ...n, isArchived: true } : n);
+        setNodes(updatedNodes);
+        setActiveNodeId(null);
+      } else if (modalState.isRootNode && !deleteAll) {
+        const result = archiveChildrenOnly(nodes, nodeId, activeNodeId);
+        setNodes(result.updatedNodes);
+        setActiveNodeId(result.newActiveNodeId);
+      } else if (includeChildren) {
+        const result = archiveNodeWithChildren(nodes, nodeId, activeNodeId);
+        setNodes(result.updatedNodes);
+        setActiveNodeId(result.newActiveNodeId);
+      } else {
+        const result = archiveNodeOnly(nodes, nodeId, activeNodeId);
+        setNodes(result.updatedNodes);
+        setActiveNodeId(result.newActiveNodeId);
+      }
+    }
+
+    setContextNodeIds(prev => {
+      const next = new Set(prev);
+      next.delete(nodeId);
+      return next;
+    });
+
+    handleModalCancel();
+  };
+
+  const sidebarRef = useRef<ImperativePanelHandle>(null);
+
+  // Sidebar expansion effect
+  // Sidebar expansion effect with improved robustness
+  useEffect(() => {
+    const panels = sidebarRef.current;
+    if (panels) {
+      // Use requestAnimationFrame to ensure the panel handle is fully ready
+      const targetSize = sidebarExpanded ? 50 : 25;
+      requestAnimationFrame(() => {
+        panels.resize(targetSize);
+      });
+    }
+  }, [sidebarExpanded]);
+
   return (
-    <div className="flex h-screen w-full bg-green-50 overflow-hidden font-sans">
+    <div className={`flex h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark bg-dark-950 text-dark-100' : 'bg-canopy-50/30 text-dark-800'}`}>
       <PanelGroup direction="horizontal" className="flex-1">
         {/* Graph Panel with Project Tabs */}
-        <Panel defaultSize={50} minSize={30}>
+        <Panel
+          id="sidebar-panel"
+          ref={sidebarRef}
+          defaultSize={sidebarExpanded ? 50 : 25}
+          minSize={20}
+          className="transition-all duration-300 ease-in-out"
+        >
           <GraphView
             nodes={nodes}
             projects={projects}
@@ -207,16 +389,32 @@ const App: React.FC = () => {
             onSelectProject={handleSelectProject}
             onCreateProject={handleCreateProject}
             onDeleteProject={handleDeleteProject}
+            isDarkMode={isDarkMode}
+            sidebarExpanded={sidebarExpanded}
+            onToggleSidebar={() => setSidebarExpanded(!sidebarExpanded)}
+            onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+            showArchived={showArchived}
+            onToggleShowArchived={() => setShowArchived(!showArchived)}
+            onArchiveNode={handleArchiveNode}
+            onDeleteNode={handleDeleteNode}
+            onUnarchiveNode={handleUnarchiveNode}
           />
         </Panel>
 
         {/* Resize Handle */}
-        <PanelResizeHandle className="w-2 bg-green-100 hover:bg-green-200 transition-colors flex items-center justify-center group">
-          <GripVertical className="w-3 h-3 text-green-400 group-hover:text-green-600" />
+        <PanelResizeHandle className={`w-1 flex items-center justify-center group transition-colors ${isDarkMode ? 'bg-dark-900 hover:bg-canopy-900/50' : 'bg-dark-100 hover:bg-canopy-200'
+          }`}>
+          <div className={`w-0.5 h-8 rounded-full transition-colors ${isDarkMode ? 'bg-dark-700 group-hover:bg-canopy-500' : 'bg-dark-300 group-hover:bg-canopy-500'
+            }`} />
         </PanelResizeHandle>
 
         {/* Chat Panel */}
-        <Panel defaultSize={50} minSize={30}>
+        <Panel
+          id="chat-panel"
+          defaultSize={sidebarExpanded ? 50 : 75}
+          minSize={20}
+          className="transition-all duration-300 ease-in-out"
+        >
           <div className="h-full flex flex-col">
             <ChatView
               activePath={activePath}
@@ -227,41 +425,69 @@ const App: React.FC = () => {
               onToggleContext={handleToggleContext}
               streamingResponse={streamingResponse}
               isLoading={isLoading}
+              isDarkMode={isDarkMode}
             />
 
             {/* Input Area */}
-            <div className="p-4 bg-white border-t border-green-200">
-              <form
-                onSubmit={handleSendMessage}
-                className="relative"
-              >
-                <div className="flex items-center gap-2 text-[10px] text-green-500 mb-2 font-mono">
-                  <Sparkles className="w-3 h-3" />
+            <div className={`p-4 sm:p-6 ${isDarkMode ? 'bg-dark-950' : 'bg-canopy-50/30'}`}>
+              <div className={`max-w-4xl mx-auto flex flex-col gap-2`}>
+                <div className={`flex items-center gap-2 text-[11px] px-1 font-medium tracking-wide uppercase ${isDarkMode ? 'text-dark-400' : 'text-dark-400'}`}>
+                  <Sparkles className="w-3 h-3 text-canopy-500" />
                   {contextNodeIds.size > 0
-                    ? `${contextNodeIds.size} nodes in context`
-                    : `${activePath.length} turns active`
+                    ? `${contextNodeIds.size} NODES IN CONTEXT`
+                    : `${activePath.length} TURNS ACTIVE`
                   }
                 </div>
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder={activeProjectId ? "Type a message..." : "Select a project to start..."}
-                  disabled={!activeProjectId || isLoading}
-                  className="w-full bg-green-50 border border-green-300 rounded-xl py-3 pl-4 pr-12 text-green-800 placeholder:text-green-400 focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500/50 transition-all disabled:opacity-50"
-                />
-                <button
-                  type="submit"
-                  disabled={!input.trim() || isLoading || !activeProjectId}
-                  className="absolute right-2 top-[calc(50%+10px)] -translate-y-1/2 p-2 rounded-lg bg-green-600 text-white hover:bg-green-500 transition-colors disabled:opacity-50 disabled:hover:bg-green-600"
+
+                <form
+                  onSubmit={handleSendMessage}
+                  className={`relative group rounded-2xl transition-all duration-300 ${isDarkMode
+                    ? 'bg-dark-900 ring-1 ring-dark-700 focus-within:ring-canopy-500/50 focus-within:shadow-glass-dark'
+                    : 'bg-white shadow-lg shadow-black/5 ring-1 ring-dark-100 focus-within:ring-canopy-400 focus-within:shadow-glass'
+                    }`}
                 >
-                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                </button>
-              </form>
+                  <input
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={activeProjectId ? "Ask anything..." : "Select a project to start..."}
+                    disabled={!activeProjectId || isLoading}
+                    className={`w-full bg-transparent border-none py-3.5 pl-5 pr-14 text-base focus:outline-none focus:ring-0 disabled:opacity-50 ${isDarkMode
+                      ? 'text-dark-100 placeholder:text-dark-500'
+                      : 'text-dark-900 placeholder:text-dark-400'
+                      }`}
+                  />
+                  <button
+                    type="submit"
+                    disabled={!input.trim() || isLoading || !activeProjectId}
+                    className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-xl transition-all duration-200 ${!input.trim() || isLoading || !activeProjectId
+                      ? isDarkMode ? 'bg-dark-800 text-dark-600' : 'bg-dark-100 text-dark-300'
+                      : 'bg-canopy-600 text-white hover:bg-canopy-500 shadow-md hover:shadow-lg scale-100 hover:scale-105 active:scale-95'
+                      }`}
+                  >
+                    {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                  </button>
+                </form>
+
+                <div className={`text-[10px] text-center ${isDarkMode ? 'text-dark-600' : 'text-dark-300'}`}>
+                  AI can make mistakes. Please verify important information.
+                </div>
+              </div>
             </div>
           </div>
         </Panel>
       </PanelGroup>
+
+      <NodeActionModal
+        isOpen={modalState.isOpen}
+        actionType={modalState.actionType}
+        isRootNode={modalState.isRootNode}
+        hasChildren={modalState.hasChildren}
+        nodeSummary={modalState.nodeSummary}
+        isDarkMode={isDarkMode}
+        onConfirm={handleModalConfirm}
+        onCancel={handleModalCancel}
+      />
     </div>
   );
 };
