@@ -1,6 +1,13 @@
+/**
+ * Gemini API Service
+ *
+ * Handles communication with the Google Gemini API.
+ * Usage tracking types are imported from the api-stats feature.
+ */
 
 import { GoogleGenAI } from "@google/genai";
 import { ChatNode } from "../types";
+import { UsageMetadata } from "../features/api-stats";
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
 
@@ -22,12 +29,13 @@ function getClient(): GoogleGenAI {
 
 /**
  * Streams a response from the model based on the node hierarchy.
+ * Returns usage metadata for API stats tracking.
  */
 export async function streamChatResponse(
   history: ChatNode[],
   newPrompt: string,
   onChunk: (chunk: string) => void
-): Promise<void> {
+): Promise<UsageMetadata | null> {
   const contents = history.map(node => [
     { role: 'user' as const, parts: [{ text: node.userPrompt }] },
     { role: 'model' as const, parts: [{ text: node.assistantResponse }] }
@@ -45,22 +53,37 @@ export async function streamChatResponse(
     }
   });
 
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+
   for await (const chunk of response) {
     const text = chunk.text;
     if (text) {
       onChunk(text);
     }
+    // Accumulate usage metadata from chunks
+    if (chunk.usageMetadata) {
+      totalInputTokens = chunk.usageMetadata.promptTokenCount || totalInputTokens;
+      totalOutputTokens = chunk.usageMetadata.candidatesTokenCount || totalOutputTokens;
+    }
   }
+
+  // Return usage metadata for API stats tracking
+  return {
+    inputTokens: totalInputTokens,
+    outputTokens: totalOutputTokens,
+  };
 }
 
 /**
  * Generates a response (or just summary) from the model.
+ * Returns usage metadata for API stats tracking.
  */
 export async function generateChatResponse(
   history: ChatNode[],
   newPrompt: string,
   summaryOnly: boolean = false
-): Promise<{ response: string; summary: string }> {
+): Promise<{ response: string; summary: string; usage: UsageMetadata | null }> {
   if (summaryOnly) {
     // Just generate the summary
     const summaryResponse = await getClient().models.generateContent({
@@ -77,7 +100,12 @@ export async function generateChatResponse(
     });
 
     const summary = summaryResponse.text?.trim().replace(/^["']|["']$/g, '') || "Untitled Exchange";
-    return { response: '', summary };
+    const usage: UsageMetadata | null = summaryResponse.usageMetadata ? {
+      inputTokens: summaryResponse.usageMetadata.promptTokenCount || 0,
+      outputTokens: summaryResponse.usageMetadata.candidatesTokenCount || 0,
+    } : null;
+
+    return { response: '', summary, usage };
   }
 
   // Full response generation (non-streaming fallback)
@@ -117,5 +145,13 @@ export async function generateChatResponse(
 
   const summary = summaryResponse.text?.trim().replace(/^["']|["']$/g, '') || "Untitled Exchange";
 
-  return { response: assistantText, summary };
+  // Combine usage from both calls
+  const usage: UsageMetadata = {
+    inputTokens: (response.usageMetadata?.promptTokenCount || 0) +
+                 (summaryResponse.usageMetadata?.promptTokenCount || 0),
+    outputTokens: (response.usageMetadata?.candidatesTokenCount || 0) +
+                  (summaryResponse.usageMetadata?.candidatesTokenCount || 0),
+  };
+
+  return { response: assistantText, summary, usage };
 }

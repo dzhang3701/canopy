@@ -5,13 +5,52 @@ import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'reac
 import { ChatNode, Project } from './types';
 import ChatView from './components/ChatView';
 import GraphView from './components/GraphView';
+import NodeActionModal, { ActionType } from './components/NodeActionModal';
 import { generateChatResponse, streamChatResponse } from './services/geminiService';
 import { getAncestorPath } from './utils/treeUtils';
 import { Send, Loader2, Sparkles, GripVertical } from 'lucide-react';
 
+// Feature imports - organized by feature module
+import {
+  ApiUsageStats,
+  DEFAULT_API_STATS,
+  ApiStatsPanel,
+  updateApiStats,
+  resetApiStats,
+} from './features/api-stats';
+import {
+  deleteProject,
+  deleteNodeOnly,
+  deleteNodeWithChildren,
+  deleteChildrenOnly,
+  hasChildren,
+  isRootNode,
+} from './features/deletion';
+import {
+  getDefaultArchiveState,
+  archiveNodeOnly,
+  archiveNodeWithChildren,
+  archiveChildrenOnly,
+  hasActiveChildren,
+  isRootNode as isArchiveRootNode,
+  unarchiveNodeWithChildren,
+} from './features/archive';
+
 const STARTER_PROJECTS: Project[] = [
-  { id: 'p1', name: 'Exploration', icon: '🚀', createdAt: Date.now() }
+  { id: 'p1', name: 'Exploration', icon: '🚀', createdAt: Date.now() },
+  { id: 'p2', name: 'Problem Solving', icon: '🧩', createdAt: Date.now() },
+  { id: 'p3', name: 'Class Notes', icon: '📝', createdAt: Date.now() },
 ];
+
+// Modal state interface
+interface NodeActionModalState {
+  isOpen: boolean;
+  actionType: ActionType;
+  nodeId: string;
+  nodeSummary: string;
+  isRootNode: boolean;
+  hasChildren: boolean;
+}
 
 const App: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>(() => {
@@ -42,6 +81,25 @@ const App: React.FC = () => {
   const [streamingResponse, setStreamingResponse] = useState('');
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
 
+  // API stats state (from api-stats feature)
+  const [apiStats, setApiStats] = useState<ApiUsageStats>(() => {
+    const saved = localStorage.getItem('canopy_api_stats');
+    return saved ? JSON.parse(saved) : DEFAULT_API_STATS;
+  });
+
+  // Node action modal state
+  const [modalState, setModalState] = useState<NodeActionModalState>({
+    isOpen: false,
+    actionType: 'delete',
+    nodeId: '',
+    nodeSummary: '',
+    isRootNode: false,
+    hasChildren: false,
+  });
+
+  // Archive view toggle state
+  const [showArchived, setShowArchived] = useState(false);
+
   // Persistence
   useEffect(() => {
     localStorage.setItem('canopy_projects', JSON.stringify(projects));
@@ -62,6 +120,11 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('canopy_context_nodes', JSON.stringify([...contextNodeIds]));
   }, [contextNodeIds]);
+
+  // Persist API stats (from api-stats feature)
+  useEffect(() => {
+    localStorage.setItem('canopy_api_stats', JSON.stringify(apiStats));
+  }, [apiStats]);
 
   const activePath = useMemo(() => {
     if (!activeNodeId) return [];
@@ -105,14 +168,25 @@ const App: React.FC = () => {
     try {
       const history = contextPath.length > 0 ? contextPath : activePath;
 
+      // Stream the response (first API call)
       let fullResponse = '';
-      await streamChatResponse(history, promptText, (chunk) => {
+      const streamUsage = await streamChatResponse(history, promptText, (chunk) => {
         fullResponse += chunk;
         setStreamingResponse(fullResponse);
       });
 
-      // Generate summary after streaming completes
-      const { summary } = await generateChatResponse(history, promptText, true);
+      // Update API stats for streaming call (from api-stats feature)
+      if (streamUsage) {
+        setApiStats(prev => updateApiStats(prev, streamUsage));
+      }
+
+      // Generate summary after streaming completes (second API call)
+      const { summary, usage: summaryUsage } = await generateChatResponse(history, promptText, true);
+
+      // Update API stats for summary call (from api-stats feature)
+      if (summaryUsage) {
+        setApiStats(prev => updateApiStats(prev, summaryUsage));
+      }
 
       const newNode: ChatNode = {
         id: uuidv4(),
@@ -122,7 +196,7 @@ const App: React.FC = () => {
         userPrompt: promptText,
         assistantResponse: fullResponse,
         timestamp: Date.now(),
-        isArchived: false,
+        isArchived: getDefaultArchiveState(),  // From archive feature
         isCollapsed: false
       };
 
@@ -156,13 +230,15 @@ const App: React.FC = () => {
     }
   };
 
+  // Project deletion handler (using deletion feature)
   const handleDeleteProject = (id: string) => {
     if (confirm("Delete project and all its nodes?")) {
-      setProjects(prev => prev.filter(p => p.id !== id));
-      setNodes(prev => prev.filter(n => n.projectId !== id));
+      const result = deleteProject(projects, nodes, id, activeProjectId);
+      setProjects(result.updatedProjects);
+      setNodes(result.updatedNodes);
       if (activeProjectId === id) {
-        setActiveProjectId(projects.find(p => p.id !== id)?.id || null);
-        setActiveNodeId(null);
+        setActiveProjectId(result.newActiveProjectId);
+        setActiveNodeId(result.newActiveNodeId);
         setContextNodeIds(new Set());
       }
     }
@@ -170,7 +246,7 @@ const App: React.FC = () => {
 
   const handleSelectProject = (id: string) => {
     setActiveProjectId(id);
-    const projectNodes = nodes.filter(n => n.projectId === id);
+    const projectNodes = nodes.filter(n => n.projectId === id && !n.isArchived);
     if (projectNodes.length > 0) {
       const latest = [...projectNodes].sort((a, b) => b.timestamp - a.timestamp)[0];
       setActiveNodeId(latest.id);
@@ -186,6 +262,156 @@ const App: React.FC = () => {
 
   const handleNodeClick = (id: string) => {
     setActiveNodeId(id);
+  };
+
+  // API stats reset handler (from api-stats feature)
+  const handleResetStats = () => {
+    setApiStats(resetApiStats());
+  };
+
+  // Open archive modal for a node
+  const handleArchiveNode = useCallback((nodeId: string) => {
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+
+    setModalState({
+      isOpen: true,
+      actionType: 'archive',
+      nodeId,
+      nodeSummary: node.summary,
+      isRootNode: isArchiveRootNode(nodes, nodeId),
+      hasChildren: hasActiveChildren(nodes, nodeId),
+    });
+  }, [nodes]);
+
+  // Open delete modal for a node
+  const handleDeleteNode = useCallback((nodeId: string) => {
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+
+    setModalState({
+      isOpen: true,
+      actionType: 'delete',
+      nodeId,
+      nodeSummary: node.summary,
+      isRootNode: isRootNode(nodes, nodeId),
+      hasChildren: hasChildren(nodes, nodeId),
+    });
+  }, [nodes]);
+
+  // Toggle archive view
+  const handleToggleShowArchived = useCallback(() => {
+    setShowArchived(prev => !prev);
+  }, []);
+
+  // Unarchive a node and its children
+  const handleUnarchiveNode = useCallback((nodeId: string) => {
+    const updatedNodes = unarchiveNodeWithChildren(nodes, nodeId);
+    setNodes(updatedNodes);
+    // Switch back to normal view and select the unarchived node
+    setShowArchived(false);
+    setActiveNodeId(nodeId);
+  }, [nodes]);
+
+  // Close the modal
+  const handleModalCancel = () => {
+    setModalState(prev => ({ ...prev, isOpen: false }));
+  };
+
+  // Handle modal confirmation
+  const handleModalConfirm = (includeChildren: boolean, deleteAll?: boolean) => {
+    const { actionType, nodeId } = modalState;
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) {
+      handleModalCancel();
+      return;
+    }
+
+    if (actionType === 'delete') {
+      if (deleteAll && modalState.isRootNode) {
+        // Delete entire project
+        const result = deleteProject(projects, nodes, node.projectId, activeProjectId);
+        setProjects(result.updatedProjects);
+        setNodes(result.updatedNodes);
+        if (activeProjectId === node.projectId) {
+          setActiveProjectId(result.newActiveProjectId);
+          setActiveNodeId(result.newActiveNodeId);
+          setContextNodeIds(new Set());
+        }
+      } else if (modalState.isRootNode && !deleteAll) {
+        // Delete children only (keep root)
+        const result = deleteChildrenOnly(nodes, nodeId, activeNodeId);
+        setNodes(result.updatedNodes);
+        if (result.newActiveNodeId !== activeNodeId) {
+          setActiveNodeId(result.newActiveNodeId);
+        }
+      } else if (includeChildren) {
+        // Delete node and all children
+        const result = deleteNodeWithChildren(nodes, nodeId, activeNodeId);
+        setNodes(result.updatedNodes);
+        if (result.newActiveNodeId !== activeNodeId) {
+          setActiveNodeId(result.newActiveNodeId);
+        }
+      } else {
+        // Delete only this node (promote children)
+        const result = deleteNodeOnly(nodes, nodeId, activeNodeId);
+        setNodes(result.updatedNodes);
+        if (result.newActiveNodeId !== activeNodeId) {
+          setActiveNodeId(result.newActiveNodeId);
+        }
+      }
+    } else if (actionType === 'archive') {
+      if (deleteAll && modalState.isRootNode) {
+        // Archive entire project (all nodes)
+        const result = archiveNodeWithChildren(nodes, nodeId, activeNodeId);
+        setNodes(result.updatedNodes);
+        // Switch to another project since this one is fully archived
+        const otherProject = projects.find(p => p.id !== node.projectId);
+        if (otherProject) {
+          setActiveProjectId(otherProject.id);
+          const projectNodes = nodes.filter(n => n.projectId === otherProject.id && !n.isArchived);
+          if (projectNodes.length > 0) {
+            const latest = [...projectNodes].sort((a, b) => b.timestamp - a.timestamp)[0];
+            setActiveNodeId(latest.id);
+          } else {
+            setActiveNodeId(null);
+          }
+        } else {
+          setActiveNodeId(null);
+        }
+        setContextNodeIds(new Set());
+      } else if (modalState.isRootNode && !deleteAll) {
+        // Archive children only (keep root)
+        const result = archiveChildrenOnly(nodes, nodeId, activeNodeId);
+        setNodes(result.updatedNodes);
+        if (result.newActiveNodeId !== activeNodeId) {
+          setActiveNodeId(result.newActiveNodeId);
+        }
+      } else if (includeChildren) {
+        // Archive node and all children
+        const result = archiveNodeWithChildren(nodes, nodeId, activeNodeId);
+        setNodes(result.updatedNodes);
+        if (result.newActiveNodeId !== activeNodeId) {
+          setActiveNodeId(result.newActiveNodeId);
+        }
+      } else {
+        // Archive only this node (promote children)
+        const result = archiveNodeOnly(nodes, nodeId, activeNodeId);
+        setNodes(result.updatedNodes);
+        if (result.newActiveNodeId !== activeNodeId) {
+          setActiveNodeId(result.newActiveNodeId);
+        }
+      }
+    }
+
+    // Clear context if affected
+    setContextNodeIds(prev => {
+      const next = new Set(prev);
+      next.delete(nodeId);
+      return next;
+    });
+
+    handleModalCancel();
   };
 
   return (
@@ -206,6 +432,9 @@ const App: React.FC = () => {
             onSelectProject={handleSelectProject}
             onCreateProject={handleCreateProject}
             onDeleteProject={handleDeleteProject}
+            onArchiveNode={handleArchiveNode}
+            onDeleteNode={handleDeleteNode}
+            onUnarchiveNode={handleUnarchiveNode}
           />
         </Panel>
 
@@ -266,6 +495,20 @@ const App: React.FC = () => {
           </div>
         </Panel>
       </PanelGroup>
+
+      {/* API Stats Panel (from api-stats feature) */}
+      <ApiStatsPanel stats={apiStats} onReset={handleResetStats} />
+
+      {/* Node Action Modal (from archive/deletion features) */}
+      <NodeActionModal
+        isOpen={modalState.isOpen}
+        actionType={modalState.actionType}
+        isRootNode={modalState.isRootNode}
+        hasChildren={modalState.hasChildren}
+        nodeSummary={modalState.nodeSummary}
+        onConfirm={handleModalConfirm}
+        onCancel={handleModalCancel}
+      />
     </div>
   );
 };

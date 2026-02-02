@@ -12,7 +12,7 @@ function wrapText(text: string, maxChars: number, maxLines: number): string[] {
 
   for (const word of words) {
     if (lines.length >= maxLines) break;
-    
+
     const testLine = currentLine ? `${currentLine} ${word}` : word;
     if (testLine.length <= maxChars) {
       currentLine = testLine;
@@ -58,6 +58,9 @@ interface GraphViewProps {
   onSelectProject: (id: string) => void;
   onCreateProject: () => void;
   onDeleteProject: (id: string) => void;
+  onArchiveNode: (id: string) => void;
+  onDeleteNode: (id: string) => void;
+  onUnarchiveNode: (id: string) => void;
 }
 
 interface TooltipData {
@@ -67,6 +70,20 @@ interface TooltipData {
   isContextNode: boolean; // If true, show only summary
 }
 
+interface NodeActionsData {
+  x: number;
+  y: number;
+  nodeId: string;
+  nodeSummary: string;
+}
+
+interface NodeActionsData {
+  x: number;
+  y: number;
+  nodeId: string;
+  nodeSummary: string;
+}
+
 const GraphView: React.FC<GraphViewProps> = ({
   nodes,
   projects,
@@ -74,12 +91,17 @@ const GraphView: React.FC<GraphViewProps> = ({
   activeNodeId,
   contextNodeIds,
   activePathIds,
+  showArchived,
+  onToggleShowArchived,
   focusNodeId,
   onNodeClick,
   onToggleContext,
   onSelectProject,
   onCreateProject,
-  onDeleteProject
+  onDeleteProject,
+  onArchiveNode,
+  onDeleteNode,
+  onUnarchiveNode
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -90,8 +112,19 @@ const GraphView: React.FC<GraphViewProps> = ({
   const prevProjectIdRef = useRef<string>(activeProjectId);
   const currentTransformRef = useRef<d3.ZoomTransform | null>(null);
   const hasInitializedRef = useRef<boolean>(false);
+  const [nodeActions, setNodeActions] = useState<NodeActionsData | null>(null);
 
-  const treeData = useMemo(() => buildHierarchy(nodes, activeProjectId), [nodes, activeProjectId]);
+  const treeData = useMemo(() => {
+    if (showArchived) {
+      return buildArchivedHierarchy(nodes, activeProjectId);
+    }
+    return buildHierarchy(nodes, activeProjectId);
+  }, [nodes, activeProjectId, showArchived]);
+
+  // Count archived nodes for badge
+  const archivedCount = useMemo(() => {
+    return nodes.filter(n => n.projectId === activeProjectId && n.isArchived).length;
+  }, [nodes, activeProjectId]);
 
   // Handle resize with ResizeObserver
   useEffect(() => {
@@ -242,6 +275,8 @@ const GraphView: React.FC<GraphViewProps> = ({
         g.attr("transform", event.transform);
         // Save the current transform so it's preserved across re-renders
         currentTransformRef.current = event.transform;
+        // Hide node actions when zooming/panning
+        setNodeActions(null);
       });
 
     zoomRef.current = zoom;
@@ -273,10 +308,10 @@ const GraphView: React.FC<GraphViewProps> = ({
     branchGradient.append("stop").attr("offset", "50%").attr("stop-color", "#34d399");
     branchGradient.append("stop").attr("offset", "100%").attr("stop-color", "#10b981");
 
-    // Links - Tree branches
+    // Links - Tree branches - amber for archived view, green for normal
     g.append("g")
       .attr("fill", "none")
-      .attr("stroke", "url(#branch-gradient)")
+      .attr("stroke", showArchived ? "#fcd34d" : "url(#branch-gradient)")
       .attr("stroke-width", 3)
       .attr("stroke-linecap", "round")
       .selectAll("path")
@@ -295,10 +330,24 @@ const GraphView: React.FC<GraphViewProps> = ({
       .attr("transform", d => `translate(${d.x},${d.y})`)
       .style("cursor", "pointer")
       .on("click", (event, d) => {
+        event.stopPropagation();
         if (event.shiftKey) {
           onToggleContext(d.data.id);
         } else {
           onNodeClick(d.data.id);
+        }
+      })
+      .on("contextmenu", (event, d) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          setNodeActions({
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+            nodeId: d.data.id,
+            nodeSummary: d.data.name
+          });
         }
       })
       .on("mouseenter", function(event, d) {
@@ -330,6 +379,7 @@ const GraphView: React.FC<GraphViewProps> = ({
 
       if (isInContext) {
         // Large expanded card for context nodes - organic leaf-like shape
+        // Large expanded card for context nodes
         const cardWidth = 220;
         const cardHeight = 140;
 
@@ -342,15 +392,17 @@ const GraphView: React.FC<GraphViewProps> = ({
           .attr("rx", 16)
           .attr("fill", "rgba(16, 185, 129, 0.1)");
 
-        // Main card background - with organic rounded corners
+        // Main card background - with organic rounded corners - amber for archived, green for normal
         el.append("rect")
           .attr("x", -cardWidth / 2)
           .attr("y", -cardHeight / 2)
           .attr("width", cardWidth)
           .attr("height", cardHeight)
           .attr("rx", 16)
-          .attr("fill", "white")
-          .attr("stroke", isActive ? "#059669" : "#6ee7b7")
+          .attr("fill", showArchived ? "#fffbeb" : "white")
+          .attr("stroke", showArchived
+            ? (isActive ? "#d97706" : "#fcd34d")
+            : (isActive ? "#059669" : "#6ee7b7"))
           .attr("stroke-width", isActive ? 3 : 2)
           .style("filter", "drop-shadow(0 4px 16px rgba(16, 185, 129, 0.15))");
 
@@ -358,7 +410,7 @@ const GraphView: React.FC<GraphViewProps> = ({
         el.append("path")
           .attr("d", `M0,${-cardHeight / 2 - 20} Q5,${-cardHeight / 2 - 10} 0,${-cardHeight / 2}`)
           .attr("fill", "none")
-          .attr("stroke", "#34d399")
+          .attr("stroke", showArchived ? "#fcd34d" : "#34d399")
           .attr("stroke-width", 3)
           .attr("stroke-linecap", "round");
 
@@ -373,15 +425,15 @@ const GraphView: React.FC<GraphViewProps> = ({
           .attr("x", -cardWidth / 2 + 22)
           .attr("y", -cardHeight / 2 + 27)
           .attr("text-anchor", "middle")
-          .attr("fill", "white")
+          .attr("fill", showArchived ? "#d97706" : "white")
           .style("font-size", "12px")
-          .text("🌿");
+          .text(showArchived ? "📦" : "🌿");
 
         // Title text
         el.append("text")
           .attr("x", -cardWidth / 2 + 44)
           .attr("y", -cardHeight / 2 + 27)
-          .attr("fill", "#065f46")
+          .attr("fill", showArchived ? "#92400e" : "#065f46")
           .style("font-size", "13px")
           .style("font-weight", "600")
           .text(() => {
@@ -397,6 +449,105 @@ const GraphView: React.FC<GraphViewProps> = ({
             .attr("r", 6)
             .attr("fill", "#10b981")
             .style("filter", "drop-shadow(0 0 4px rgba(16, 185, 129, 0.6))");
+        }
+        // Action buttons group (Archive/Unarchive & Delete)
+        // Skip for virtual root node
+        if (d.data.id !== '__archived_root__') {
+          const actionsGroup = el.append("g")
+            .attr("class", "node-actions")
+            .attr("transform", `translate(${cardWidth / 2 - 44}, ${-cardHeight / 2 + 12})`);
+
+          if (showArchived) {
+            // Unarchive button (when viewing archived nodes)
+            actionsGroup.append("rect")
+              .attr("x", 0)
+              .attr("y", 0)
+              .attr("width", 18)
+              .attr("height", 18)
+              .attr("rx", 4)
+              .attr("fill", "#d1fae5")
+              .attr("class", "unarchive-btn")
+              .style("cursor", "pointer")
+              .on("click", (event) => {
+                event.stopPropagation();
+                onUnarchiveNode(d.data.id);
+              })
+              .on("mouseenter", function() {
+                d3.select(this).attr("fill", "#a7f3d0");
+              })
+              .on("mouseleave", function() {
+                d3.select(this).attr("fill", "#d1fae5");
+              });
+
+            actionsGroup.append("text")
+              .attr("x", 9)
+              .attr("y", 13)
+              .attr("text-anchor", "middle")
+              .attr("fill", "#059669")
+              .style("font-size", "10px")
+              .style("pointer-events", "none")
+              .text("↩");
+          } else {
+            // Archive button (when viewing active nodes)
+            actionsGroup.append("rect")
+              .attr("x", 0)
+              .attr("y", 0)
+              .attr("width", 18)
+              .attr("height", 18)
+              .attr("rx", 4)
+              .attr("fill", "#fef3c7")
+              .attr("class", "archive-btn")
+              .style("cursor", "pointer")
+              .on("click", (event) => {
+                event.stopPropagation();
+                onArchiveNode(d.data.id);
+              })
+              .on("mouseenter", function() {
+                d3.select(this).attr("fill", "#fde68a");
+              })
+              .on("mouseleave", function() {
+                d3.select(this).attr("fill", "#fef3c7");
+              });
+
+            actionsGroup.append("text")
+              .attr("x", 9)
+              .attr("y", 13)
+              .attr("text-anchor", "middle")
+              .attr("fill", "#d97706")
+              .style("font-size", "10px")
+              .style("pointer-events", "none")
+              .text("📦");
+          }
+
+          // Delete button (always shown)
+          actionsGroup.append("rect")
+            .attr("x", 22)
+            .attr("y", 0)
+            .attr("width", 18)
+            .attr("height", 18)
+            .attr("rx", 4)
+            .attr("fill", "#fee2e2")
+            .attr("class", "delete-btn")
+            .style("cursor", "pointer")
+            .on("click", (event) => {
+              event.stopPropagation();
+              onDeleteNode(d.data.id);
+            })
+            .on("mouseenter", function() {
+              d3.select(this).attr("fill", "#fecaca");
+            })
+            .on("mouseleave", function() {
+              d3.select(this).attr("fill", "#fee2e2");
+            });
+
+          actionsGroup.append("text")
+            .attr("x", 31)
+            .attr("y", 13)
+            .attr("text-anchor", "middle")
+            .attr("fill", "#dc2626")
+            .style("font-size", "10px")
+            .style("pointer-events", "none")
+            .text("🗑");
         }
 
         // Question section
@@ -470,11 +621,16 @@ const GraphView: React.FC<GraphViewProps> = ({
           .attr("cy", 0)
           .attr("r", nodeRadius)
           .attr("fill", () => {
+            if (showArchived) {
+              if (isActive) return "#fbbf24";
+              if (children > 1) return "#fcd34d";
+              return "#fde68a";
+            }
             if (isActive) return "url(#branch-gradient)";
             if (children > 1) return "#6ee7b7";
             return "#a7f3d0";
           })
-          .attr("stroke", isActive ? "#059669" : "rgba(255,255,255,0.5)")
+          .attr("stroke", isActive ? (showArchived ? "#d97706" : "#059669") : "rgba(255,255,255,0.5)")
           .attr("stroke-width", isActive ? 2 : 1)
           .attr("opacity", isActive ? 1 : 0.9)
           .style("filter", isActive ? "drop-shadow(0 2px 4px rgba(16, 185, 129, 0.4))" : "none");
@@ -493,7 +649,7 @@ const GraphView: React.FC<GraphViewProps> = ({
           el.append("text")
             .attr("dy", 24)
             .attr("text-anchor", "middle")
-            .attr("fill", "#065f46")
+            .attr("fill", showArchived ? "#92400e" : "#065f46")
             .style("font-size", "10px")
             .style("font-weight", "600")
             .text(() => {
@@ -521,22 +677,61 @@ const GraphView: React.FC<GraphViewProps> = ({
       svg.call(zoom.transform, currentTransformRef.current);
     }
 
-  }, [treeData, nodes, activeNodeId, contextNodeIds, activePathIds, onNodeClick, onToggleContext, containerSize, activeProjectId]);
+  }, [treeData, nodes, activeNodeId, contextNodeIds, activePathIds, showArchived, onNodeClick, onToggleContext, containerSize, activeProjectId, onArchiveNode, onDeleteNode, onUnarchiveNode]);
+
+  // Close node actions when clicking elsewhere
+  const handleContainerClick = () => {
+    setNodeActions(null);
+  };
 
   return (
-    <div className="h-full flex flex-col bg-gradient-to-b from-emerald-50 via-green-50 to-teal-50">
-      {/* Header with Logo - Tree trunk inspired */}
-      <div className="px-4 py-3 border-b border-emerald-200 bg-gradient-to-r from-emerald-700 via-green-600 to-emerald-700 flex items-center gap-3 shadow-md">
-        <div className="relative">
+    <div className={`h-full flex flex-col ${showArchived ? 'bg-amber-50' : 'bg-gradient-to-b from-emerald-50 via-green-50 to-teal-50'}`}>
+      {/* Header with Logo - Tree trunk inspired and Archive Toggle */}
+      <div className="px-4 py-3 border-b border-emerald-200 bg-gradient-to-r from-emerald-700 via-green-600 to-emerald-700 flex items-center justify-between">
+        <div className="flex items-center gap-3 shadow-md">
+          <div className="relative">
           <div className="w-8 h-8 rounded-full bg-emerald-400/30 flex items-center justify-center">
             <Leaf className="w-5 h-5 text-emerald-100" />
           </div>
           <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-lime-400 rounded-full animate-pulse" />
         </div>
         <div>
-          <span className="font-bold text-white text-lg tracking-wide">Canopy</span>
+            <span className="font-bold text-white text-lg tracking-wide">Canopy</span>
           <span className="text-emerald-200 text-xs ml-2 font-light">thought tree</span>
         </div>
+        </div>
+        {/* Archive Toggle */}
+        <button
+          onClick={onToggleShowArchived}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+            showArchived
+              ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+              : 'bg-green-50 text-green-600 hover:bg-green-100'
+          }`}
+          title={showArchived ? 'Return to active nodes' : 'View archived nodes'}
+        >
+          {showArchived ? (
+            <>
+              <Eye className="w-3.5 h-3.5" />
+              <span>Unarchived</span>
+              {archivedCount > 0 && (
+                <span className="bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded-full text-[10px]">
+                  {archivedCount}
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              <Archive className="w-3.5 h-3.5" />
+              <span>Archive</span>
+              {archivedCount > 0 && (
+                <span className="bg-green-200 text-green-700 px-1.5 py-0.5 rounded-full text-[10px]">
+                  {archivedCount}
+                </span>
+              )}
+            </>
+          )}
+        </button>
       </div>
 
       {/* Project Tabs - Leaf-styled tabs */}
@@ -577,7 +772,11 @@ const GraphView: React.FC<GraphViewProps> = ({
       </div>
 
       {/* Graph Area - Forest floor background */}
-      <div ref={containerRef} className="flex-1 relative overflow-hidden">
+      <div
+        ref={containerRef}
+        className="flex-1 relative overflow-hidden"
+        onClick={handleContainerClick}
+      >
         {/* Decorative background pattern */}
         <div className="absolute inset-0 opacity-[0.03] pointer-events-none">
           <svg width="100%" height="100%" className="absolute inset-0">
@@ -641,6 +840,56 @@ const GraphView: React.FC<GraphViewProps> = ({
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* Node Actions Context Menu (for right-click on condensed nodes) */}
+        {nodeActions && (
+          <div
+            className="absolute z-50 bg-white border border-green-200 rounded-lg shadow-xl p-1 min-w-[140px]"
+            style={{
+              left: nodeActions.x,
+              top: nodeActions.y,
+              transform: nodeActions.x > (containerRef.current?.clientWidth || 0) / 2 ? 'translateX(-100%)' : undefined
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-2 py-1 text-xs font-medium text-green-700 border-b border-green-100 mb-1 truncate">
+              {nodeActions.nodeSummary}
+            </div>
+            {showArchived ? (
+              <button
+                onClick={() => {
+                  onUnarchiveNode(nodeActions.nodeId);
+                  setNodeActions(null);
+                }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-green-700 hover:bg-green-50 rounded transition-colors"
+              >
+                <ArchiveRestore className="w-3 h-3" />
+                Unarchive
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  onArchiveNode(nodeActions.nodeId);
+                  setNodeActions(null);
+                }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-amber-700 hover:bg-amber-50 rounded transition-colors"
+              >
+                <Archive className="w-3 h-3" />
+                Archive
+              </button>
+            )}
+            <button
+              onClick={() => {
+                onDeleteNode(nodeActions.nodeId);
+                setNodeActions(null);
+              }}
+              className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded transition-colors"
+            >
+              <Trash2 className="w-3 h-3" />
+              Delete
+            </button>
           </div>
         )}
 

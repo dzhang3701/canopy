@@ -1,3 +1,14 @@
+/**
+ * Core Type Definitions
+ *
+ * This file contains the core types used throughout the application.
+ * Feature-specific types are defined in their respective feature modules
+ * and re-exported here for convenience.
+ */
+
+// Re-export feature types for backward compatibility
+export type { ApiUsageStats, UsageMetadata } from './features/api-stats';
+export type { ArchivableNode } from './features/archive';
 
 export interface ChatNode {
   id: string;
@@ -7,7 +18,7 @@ export interface ChatNode {
   userPrompt: string;
   assistantResponse: string;
   timestamp: number;
-  isArchived: boolean;
+  isArchived: boolean;  // From archive feature
   isCollapsed: boolean;
 }
 
