@@ -6,11 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "start": "node server.js",
     "preview": "vite preview"
   },
   "dependencies": {
     "@google/genai": "^1.39.0",
     "d3": "^7.9.0",
+    "express": "^5.2.1",
     "katex": "^0.16.28",
     "lucide-react": "^0.563.0",
     "react": "^19.2.4",
