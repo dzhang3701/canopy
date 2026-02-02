@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react'
 import * as d3 from 'd3';
 import { ChatNode, TreeDataNode, Project } from '../types';
 import { buildHierarchy, buildArchivedHierarchy, getAncestorPath } from '../utils/treeUtils';
-import { TreePalm, Moon, Sun, List, Network, Archive, Trash2, RotateCcw } from 'lucide-react';
+import { TreePalm, Moon, Sun, List, Network, Archive, Trash2, RotateCcw, MessageSquare, Bot } from 'lucide-react';
 
 interface GraphViewProps {
   nodes: ChatNode[];
@@ -15,15 +15,25 @@ interface GraphViewProps {
   focusNodeId: string | null;
   isDarkMode: boolean;
   sidebarExpanded: boolean;
-  onToggleSidebar: () => void;
-  onToggleDarkMode: () => void;
-  showArchived: boolean;
-  onToggleShowArchived: () => void;
-  onNodeClick: (id: string) => void;
-  onToggleContext: (id: string) => void;
-  onArchiveNode: (id: string) => void;
   onDeleteNode: (id: string) => void;
   onUnarchiveNode: (id: string) => void;
+}
+
+interface TooltipState {
+  x: number;
+  y: number;
+  content?: {
+    userPrompt: string;
+    assistantResponse: string;
+    timestamp: number;
+  };
+}
+
+interface ContextMenuState {
+  x: number;
+  y: number;
+  nodeId: string | null;
+  isArchived: boolean;
 }
 
 const GraphView: React.FC<GraphViewProps> = ({
@@ -50,14 +60,14 @@ const GraphView: React.FC<GraphViewProps> = ({
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const nodePositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+
   const hasInitializedRef = useRef<boolean>(false);
   const prevProjectIdRef = useRef<string>(activeProjectId);
   const currentTransformRef = useRef<d3.ZoomTransform | null>(null);
 
   const treeData = useMemo(() => {
-    if (showArchived) {
-      return buildArchivedHierarchy(nodes, activeProjectId);
-    }
     return buildHierarchy(nodes, activeProjectId, showArchived);
   }, [nodes, activeProjectId, showArchived]);
 
@@ -109,6 +119,13 @@ const GraphView: React.FC<GraphViewProps> = ({
       return () => clearTimeout(timer);
     }
   }, [focusNodeId, focusOnNode, sidebarExpanded]);
+
+  // Close context menu on click outside
+  useEffect(() => {
+    const handleClick = () => setContextMenu(null);
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
+  }, []);
 
   // Get path from root to active node for thin sidebar
   const pathToActive = useMemo(() => {
@@ -190,7 +207,10 @@ const GraphView: React.FC<GraphViewProps> = ({
       .selectAll("path")
       .data(tree.links())
       .join("path")
-      .attr("stroke", d => activePathIds.has(d.target.data.id) ? activeLinkColor : linkColor)
+      .attr("stroke", d => {
+        if (d.source.data.id === '__virtual_root__') return 'transparent';
+        return activePathIds.has(d.target.data.id) ? activeLinkColor : linkColor;
+      })
       .attr("opacity", d => activePathIds.has(d.target.data.id) ? 1 : 0.6)
       .attr("d", linkGenerator);
 
@@ -199,14 +219,32 @@ const GraphView: React.FC<GraphViewProps> = ({
       .data(tree.descendants())
       .join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`)
-      .style("cursor", "pointer")
+      .style("cursor", d => d.data.id === '__virtual_root__' ? "default" : "pointer")
+      .style("display", d => d.data.id === '__virtual_root__' ? 'none' : 'block')
       .on("click", (event, d) => {
+        if (d.data.id === '__virtual_root__') return;
         event.stopPropagation();
-        if (event.shiftKey) {
+        if (d.data.data.isArchived) {
+          onUnarchiveNode(d.data.id);
+        } else if (event.shiftKey) {
           onToggleContext(d.data.id);
         } else {
           onNodeClick(d.data.id);
         }
+      })
+      .on("contextmenu", (event, d) => {
+        if (d.data.id === '__virtual_root__') return;
+        event.preventDefault();
+        event.stopPropagation();
+        setContextMenu({
+          x: event.clientX,
+          y: event.clientY,
+          nodeId: d.data.id,
+          isArchived: d.data.data.isArchived
+        });
+      })
+      .on("mousemove", (event) => {
+        // No-op to avoid conflicts
       });
 
     node.each(function (d) {
@@ -214,6 +252,7 @@ const GraphView: React.FC<GraphViewProps> = ({
       const isActive = d.data.id === activeNodeId;
       const isInPath = activePathIds.has(d.data.id);
       const isInContext = contextNodeIds.has(d.data.id);
+      const isNodeArchived = d.data.data.isArchived;
 
       const text = d.data.name || 'New';
       const maxCharWidth = 160;
@@ -248,18 +287,26 @@ const GraphView: React.FC<GraphViewProps> = ({
         .attr("height", rectHeight)
         .attr("rx", 12)
         .attr("ry", 12)
-        .attr("fill", isDarkMode ? '#18181b' : '#ffffff')
-        .attr("stroke", isActive ? activeTextColor : isInPath ? activeLinkColor : linkColor)
+        .attr("fill", isNodeArchived
+          ? (isDarkMode ? '#27272a' : '#f9fafb')
+          : (isDarkMode ? '#18181b' : '#ffffff'))
+        .attr("stroke", isNodeArchived
+          ? (isDarkMode ? '#3f3f46' : '#e4e4e7')
+          : (isActive ? activeTextColor : isInPath ? activeLinkColor : linkColor))
         .attr("stroke-width", isActive ? 2 : 1.5)
         .attr("class", "node-pill")
+        .style("opacity", isNodeArchived ? 0.6 : 1)
         .style("filter", isActive ? `drop-shadow(0 0 8px ${hoverGlow})` : "none");
 
       const textEl = el.append("text")
         .attr("text-anchor", "middle")
-        .attr("fill", isActive ? activeTextColor : isInPath ? activeLinkColor : textColor)
+        .attr("fill", isNodeArchived
+          ? (isDarkMode ? '#71717a' : '#a1a1aa')
+          : (isActive ? activeTextColor : isInPath ? activeLinkColor : textColor))
         .style("font-size", "13px")
         .style("font-weight", isActive ? "600" : "500")
-        .style("pointer-events", "none");
+        .style("pointer-events", "none")
+        .style("font-style", isNodeArchived ? "italic" : "normal");
 
       displayLines.forEach((line, i) => {
         textEl.append("tspan")
@@ -281,16 +328,38 @@ const GraphView: React.FC<GraphViewProps> = ({
           .attr("stroke-width", 2);
       }
 
-      el.on("mouseenter", function () {
+      el.on("mouseenter", function (event) {
+        if (d.data.id === '__virtual_root__') return;
+
+        // Style transition
         rect.transition().duration(200)
           .attr("stroke", activeTextColor)
           .attr("stroke-width", 2.5);
         if (isDarkMode) rect.style("fill", "#27272a");
+
+        // Tooltip logic
+        const target = event.currentTarget as HTMLElement;
+        const boundingPadding = target.getBoundingClientRect();
+        const nodeData = d.data.data;
+
+        setTooltip({
+          x: boundingPadding.right,
+          y: boundingPadding.top + boundingPadding.height / 2,
+          content: {
+            userPrompt: nodeData.userPrompt,
+            assistantResponse: nodeData.assistantResponse,
+            timestamp: nodeData.timestamp
+          }
+        });
       }).on("mouseleave", function () {
+        // Style transition
         rect.transition().duration(200)
-          .attr("stroke", isActive ? activeTextColor : isInPath ? activeLinkColor : linkColor)
+          .attr("stroke", isNodeArchived ? (isDarkMode ? '#3f3f46' : '#e4e4e7') : (isActive ? activeTextColor : isInPath ? activeLinkColor : linkColor))
           .attr("stroke-width", isActive ? 2 : 1.5);
-        if (isDarkMode) rect.style("fill", "#18181b");
+        if (isDarkMode) rect.style("fill", isNodeArchived ? "#27272a" : "#18181b");
+
+        // Hide tooltip
+        setTooltip(null);
       });
     });
 
@@ -389,13 +458,39 @@ const GraphView: React.FC<GraphViewProps> = ({
       <div key={node.id}>
         <button
           onClick={(e) => {
-            if (e.shiftKey) {
+            if (node.isArchived) {
+              onUnarchiveNode(node.id);
+            } else if (e.shiftKey) {
               onToggleContext(node.id);
             } else {
               onNodeClick(node.id);
             }
           }}
-          className={`sidebar-item group w-full text-left px-3 py-1.5 rounded-md text-xs flex items-center justify-between gap-3 transition-all ${isActive
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setContextMenu({
+              x: e.clientX,
+              y: e.clientY,
+              nodeId: node.id,
+              isArchived: node.isArchived
+            });
+          }}
+          onMouseEnter={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            setTooltip({
+              x: rect.right,
+              y: rect.top + rect.height / 2,
+              content: {
+                userPrompt: node.userPrompt,
+                assistantResponse: node.assistantResponse,
+                timestamp: node.timestamp
+              }
+            });
+          }}
+          onMouseMove={() => { }}
+          onMouseLeave={() => setTooltip(null)}
+          className={`sidebar-item group w-full text-left px-3 py-1.5 rounded-md text-[14px] flex items-center justify-between gap-3 transition-all ${isActive
             ? isDarkMode
               ? 'bg-dark-800 text-canopy-400 border-l-2 border-canopy-500'
               : 'bg-canopy-50 text-canopy-700 border-l-2 border-canopy-500'
@@ -409,7 +504,7 @@ const GraphView: React.FC<GraphViewProps> = ({
               {node.summary || 'New conversation'}
             </span>
             {childCount > 1 && (
-              <span className={`text-[9px] px-1 rounded-sm flex-shrink-0 ${isDarkMode
+              <span className={`text-[10px] px-1 rounded-sm flex-shrink-0 ${isDarkMode
                 ? 'bg-dark-700 text-dark-300'
                 : 'bg-white text-dark-400 border border-canopy-100'
                 }`}>
@@ -425,33 +520,6 @@ const GraphView: React.FC<GraphViewProps> = ({
             {isInContext && (
               <span className={`w-1.5 h-1.5 rounded-full ${isDarkMode ? 'bg-canopy-400' : 'bg-canopy-500'}`} />
             )}
-
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-1">
-              {node.isArchived ? (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onUnarchiveNode(node.id); }}
-                  className={`p-1 rounded transition-colors ${isDarkMode ? 'hover:bg-dark-700 text-dark-400' : 'hover:bg-canopy-100 text-dark-500'}`}
-                  title="Unarchive"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                </button>
-              ) : (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onArchiveNode(node.id); }}
-                  className={`p-1 rounded transition-colors ${isDarkMode ? 'hover:bg-dark-700 text-dark-400' : 'hover:bg-canopy-100 text-dark-500'}`}
-                  title="Archive"
-                >
-                  <Archive className="w-3 h-3" />
-                </button>
-              )}
-              <button
-                onClick={(e) => { e.stopPropagation(); onDeleteNode(node.id); }}
-                className={`p-1 rounded transition-colors ${isDarkMode ? 'hover:bg-red-900/30 text-red-500' : 'hover:bg-red-50 text-red-500'}`}
-                title="Delete"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
-            </div>
           </div>
         </button>
       </div>
@@ -459,8 +527,8 @@ const GraphView: React.FC<GraphViewProps> = ({
   };
 
   return (
-    <div className={`h-full flex flex-col ${isDarkMode ? 'bg-dark-950' : 'bg-white'}`}>
-      <div className={`px-4 py-3 border-b flex items-center justify-between ${isDarkMode ? 'border-dark-800 bg-dark-950' : 'border-canopy-100 bg-white'}`}>
+    <div className={`h-full flex flex-col ${isDarkMode ? 'bg-dark-950' : 'bg-zinc-50/50'}`}>
+      <div className={`px-4 py-3 border-b flex items-center justify-between ${isDarkMode ? 'border-dark-800 bg-dark-950' : 'border-canopy-100 bg-zinc-50/80 backdrop-blur-sm'}`}>
         <div className="flex items-center gap-2">
           <div className={`p-1 rounded-md ${isDarkMode ? 'bg-canopy-500/10' : 'bg-canopy-50'}`}>
             <TreePalm className={`w-4 h-4 ${isDarkMode ? 'text-canopy-400' : 'text-canopy-600'}`} />
@@ -507,9 +575,9 @@ const GraphView: React.FC<GraphViewProps> = ({
         )}
 
         {!sidebarExpanded && treeData && (
-          <div className={`h-full overflow-y-auto py-2 px-2 custom-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:none]`}>
+          <div className={`h-full overflow-y-auto py-2 px-2 custom-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:none] ${isDarkMode ? '' : 'bg-zinc-50/30'}`}>
             {pathToActive.length === 0 ? (
-              <div className={`text-xs text-center ${isDarkMode ? 'text-dark-400' : 'text-zinc-400'}`}>
+              <div className={`text-[14px] text-center ${isDarkMode ? 'text-dark-400' : 'text-zinc-400'}`}>
                 No active conversation
               </div>
             ) : (
@@ -542,6 +610,92 @@ const GraphView: React.FC<GraphViewProps> = ({
 
         {sidebarExpanded && (
           <svg ref={svgRef} className="w-full h-full" />
+        )}
+
+        {/* Node Hover Tooltip */}
+        {tooltip && tooltip.content && (
+          <div
+            className="fixed z-[100] pointer-events-none glass p-4 rounded-2xl shadow-premium border border-canopy-100 dark:border-canopy-900/40 max-w-[320px] animate-in fade-in slide-in-from-left-2 zoom-in-95 duration-200"
+            style={{
+              left: Math.min(tooltip.x + 12, window.innerWidth - 340),
+              top: Math.max(20, Math.min(tooltip.y - 100, window.innerHeight - 300))
+            }}
+          >
+            <div className="relative z-10 space-y-4">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[10px] font-bold text-canopy-600 dark:text-canopy-400 uppercase tracking-widest">
+                    <span>Query</span>
+                  </div>
+                  {sidebarExpanded && (
+                    <span className="text-[9px] text-dark-400 dark:text-dark-500 font-medium whitespace-nowrap">
+                      {new Date(tooltip.content.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase()}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[12px] leading-relaxed text-dark-800 dark:text-dark-100 font-semibold line-clamp-4">
+                  {tooltip.content.userPrompt || 'No query available'}
+                </p>
+              </div>
+
+              <div className="space-y-1.5 pt-3 border-t border-canopy-100 dark:border-canopy-900/20">
+                <div className="text-[10px] font-bold text-canopy-600 dark:text-canopy-400 uppercase tracking-widest">
+                  <span>Response</span>
+                </div>
+                <p className="text-[12px] leading-relaxed text-dark-600 dark:text-dark-300 italic line-clamp-6">
+                  {tooltip.content.assistantResponse || 'Generating response...'}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Node Context Menu */}
+        {contextMenu && contextMenu.nodeId && (
+          <div
+            className="fixed z-[101] glass rounded-xl shadow-premium border border-canopy-100 dark:border-canopy-900/30 min-w-[140px] overflow-hidden animate-in fade-in zoom-in-95 duration-100"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-1.5 flex flex-col gap-1">
+              {contextMenu.isArchived ? (
+                <button
+                  onClick={() => {
+                    onUnarchiveNode(contextMenu.nodeId!);
+                    setContextMenu(null);
+                  }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-[14px] font-medium transition-colors ${isDarkMode ? 'hover:bg-canopy-900/30 text-canopy-400' : 'hover:bg-canopy-50 text-canopy-600'
+                    }`}
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Restore Node
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    onArchiveNode(contextMenu.nodeId!);
+                    setContextMenu(null);
+                  }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-[14px] font-medium transition-colors ${isDarkMode ? 'hover:bg-amber-900/30 text-amber-500' : 'hover:bg-amber-50 text-amber-600'
+                    }`}
+                >
+                  <Archive className="w-3.5 h-3.5" />
+                  Archive Node
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  onDeleteNode(contextMenu.nodeId!);
+                  setContextMenu(null);
+                }}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-[14px] font-medium transition-colors ${isDarkMode ? 'hover:bg-red-900/30 text-red-500' : 'hover:bg-red-50 text-red-600'
+                  }`}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Delete Node
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

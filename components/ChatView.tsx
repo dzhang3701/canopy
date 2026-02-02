@@ -42,11 +42,11 @@ const ChatView: React.FC<ChatViewProps> = ({
   return (
     <div
       ref={scrollRef}
-      className={`flex-1 overflow-y-auto px-4 py-8 custom-scrollbar ${isDarkMode ? 'bg-dark-950' : 'bg-canopy-50/20'}`}
+      className={`flex-1 overflow-y-auto px-4 py-8 custom-scrollbar ${isDarkMode ? 'bg-dark-950' : 'bg-zinc-50/50'}`}
     >
       {activePath.length === 0 && !isLoading ? (
         <div className={`h-full flex flex-col items-center justify-center space-y-6 animate-in fade-in duration-700`}>
-          <div className={`p-6 rounded-3xl ${isDarkMode ? 'bg-dark-900 shadow-premium' : 'bg-white shadow-premium'}`}>
+          <div className={`p-6 rounded-3xl ${isDarkMode ? 'bg-dark-900 shadow-premium' : 'bg-zinc-100/50 shadow-premium border border-canopy-100'}`}>
             <Bot className={`w-12 h-12 ${isDarkMode ? 'text-canopy-500' : 'text-canopy-600'}`} />
           </div>
           <div className="text-center space-y-2">
@@ -65,7 +65,7 @@ const ChatView: React.FC<ChatViewProps> = ({
                 <div className="flex flex-col items-end pl-10 group">
                   <div className={`px-6 py-4 rounded-[1.75rem] rounded-br-md shadow-sm text-[15px] leading-relaxed whitespace-pre-wrap transition-all ${isDarkMode
                     ? 'bg-dark-800 text-dark-50 border border-dark-700 group-hover:border-dark-600'
-                    : 'bg-white text-dark-900 border border-canopy-100 group-hover:border-canopy-200 shadow-sm'
+                    : 'bg-zinc-50/50 text-dark-900 border border-canopy-100 group-hover:border-canopy-200 shadow-sm'
                     }`}>
                     {node.userPrompt}
                   </div>
@@ -78,10 +78,7 @@ const ChatView: React.FC<ChatViewProps> = ({
 
                 {/* Assistant Response */}
                 {hasResponse && (
-                  <div className="flex items-start gap-4 pr-10 group relative">
-                    <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center shadow-premium ${isDarkMode ? 'bg-canopy-600/20 text-canopy-400 border border-canopy-500/30' : 'bg-canopy-100 text-canopy-600 border border-canopy-200'}`}>
-                      <Bot className="w-4 h-4" />
-                    </div>
+                  <div className="flex flex-col pr-10 group relative pl-4 border-l-2 border-canopy-500/10 dark:border-canopy-500/5">
 
                     <div className="flex-1 space-y-3">
                       <div className={`prose prose-sm leading-relaxed max-w-none prose-headings:font-bold prose-a:font-medium prose-a:no-underline hover:prose-a:underline ${isDarkMode
@@ -124,10 +121,7 @@ const ChatView: React.FC<ChatViewProps> = ({
 
           {/* Streaming Response */}
           {isLoading && (
-            <div className="flex items-start gap-4 pr-10 animate-in fade-in duration-500">
-              <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center shadow-premium ${isDarkMode ? 'bg-canopy-600/20 text-canopy-400' : 'bg-canopy-100 text-canopy-600'}`}>
-                <Bot className="w-4 h-4" />
-              </div>
+            <div className="flex flex-col pr-10 animate-in fade-in duration-500 pl-4 border-l-2 border-canopy-500/10 dark:border-canopy-500/5">
 
               <div className="flex-1">
                 {streamingResponse ? (

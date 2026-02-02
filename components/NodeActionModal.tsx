@@ -54,7 +54,7 @@ const NodeActionModal: React.FC<NodeActionModalProps> = ({
       />
 
       {/* Modal */}
-      <div className={`relative w-full max-w-md overflow-hidden rounded-3xl border shadow-premium animate-in zoom-in-95 duration-200 ${isDarkMode ? 'bg-dark-900 border-dark-800' : 'bg-white border-canopy-100'
+      <div className={`relative w-full max-w-md overflow-hidden rounded-3xl border shadow-premium animate-in zoom-in-95 duration-200 ${isDarkMode ? 'bg-dark-900 border-dark-800' : 'bg-zinc-50 border-canopy-100'
         }`}>
         {/* Header */}
         <div className={`flex items-center justify-between px-6 py-5 border-b ${isDarkMode ? 'border-dark-800' : 'border-canopy-50'}`}>

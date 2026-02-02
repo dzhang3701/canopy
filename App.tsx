@@ -415,7 +415,7 @@ const App: React.FC = () => {
   }, [sidebarExpanded]);
 
   return (
-    <div className={`flex h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark bg-dark-950 text-dark-100' : 'bg-canopy-50/30 text-dark-800'}`}>
+    <div className={`flex h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark bg-dark-950 text-dark-100' : 'bg-zinc-100/20 text-dark-800'}`}>
       <PanelGroup direction="horizontal" className="flex-1">
         {/* Sidebar Panel */}
         <Panel

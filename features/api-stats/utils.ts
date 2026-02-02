@@ -11,8 +11,8 @@ import { ApiUsageStats, UsageMetadata } from './types';
  * Gemini 2.0 Flash pricing (per 1M tokens)
  */
 export const PRICING = {
-  INPUT_PER_MILLION: 0.10,
-  OUTPUT_PER_MILLION: 0.40,
+  INPUT_PER_MILLION: 0.075,
+  OUTPUT_PER_MILLION: 0.30,
 } as const;
 
 /**
