@@ -2,8 +2,8 @@
 import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import * as d3 from 'd3';
 import { ChatNode, TreeDataNode, Project } from '../types';
-import { buildHierarchy, buildArchivedHierarchy, getAncestorPath } from '../utils/treeUtils';
-import { TreePalm, Moon, Sun, List, Network, Archive, Trash2, RotateCcw, MessageSquare, Bot } from 'lucide-react';
+import { buildHierarchy, getAncestorPath } from '../utils/treeUtils';
+import { TreePalm, Moon, Sun, List, Network, Archive, Trash2, RotateCcw, Plus, X } from 'lucide-react';
 
 interface GraphViewProps {
   nodes: ChatNode[];
@@ -15,6 +15,18 @@ interface GraphViewProps {
   focusNodeId: string | null;
   isDarkMode: boolean;
   sidebarExpanded: boolean;
+  showArchived: boolean;
+  onToggleSidebar: () => void;
+  onToggleDarkMode: () => void;
+  onToggleShowArchived: () => void;
+  onNodeClick: (id: string) => void;
+  onToggleContext: (id: string) => void;
+  onSelectProject: (id: string) => void;
+  onCreateProject: () => void;
+  onDeleteProject: (id: string) => void;
+  onRenameProject: (id: string) => void;
+  onRenameNode: (id: string) => void;
+  onArchiveNode: (id: string) => void;
   onDeleteNode: (id: string) => void;
   onUnarchiveNode: (id: string) => void;
 }
@@ -38,6 +50,7 @@ interface ContextMenuState {
 
 const GraphView: React.FC<GraphViewProps> = ({
   nodes,
+  projects,
   activeProjectId,
   activeNodeId,
   contextNodeIds,
@@ -45,12 +58,17 @@ const GraphView: React.FC<GraphViewProps> = ({
   focusNodeId,
   isDarkMode,
   sidebarExpanded,
+  showArchived,
   onToggleSidebar,
   onToggleDarkMode,
-  showArchived,
   onToggleShowArchived,
   onNodeClick,
   onToggleContext,
+  onSelectProject,
+  onCreateProject,
+  onDeleteProject,
+  onRenameProject,
+  onRenameNode,
   onArchiveNode,
   onDeleteNode,
   onUnarchiveNode
@@ -74,6 +92,15 @@ const GraphView: React.FC<GraphViewProps> = ({
   const archivedCount = useMemo(() => {
     return nodes.filter(n => n.projectId === activeProjectId && n.isArchived).length;
   }, [nodes, activeProjectId]);
+
+  // Reset view when project changes
+  useEffect(() => {
+    if (prevProjectIdRef.current !== activeProjectId) {
+      currentTransformRef.current = null;
+      hasInitializedRef.current = false;
+      prevProjectIdRef.current = activeProjectId;
+    }
+  }, [activeProjectId]);
 
   // Handle resize with ResizeObserver
   useEffect(() => {
@@ -227,6 +254,8 @@ const GraphView: React.FC<GraphViewProps> = ({
         if (d.data.data.isArchived) {
           onUnarchiveNode(d.data.id);
         } else if (event.shiftKey) {
+          onRenameNode(d.data.id);
+        } else if (event.ctrlKey || event.metaKey) {
           onToggleContext(d.data.id);
         } else {
           onNodeClick(d.data.id);
@@ -461,6 +490,8 @@ const GraphView: React.FC<GraphViewProps> = ({
             if (node.isArchived) {
               onUnarchiveNode(node.id);
             } else if (e.shiftKey) {
+              onRenameNode(node.id);
+            } else if (e.ctrlKey || e.metaKey) {
               onToggleContext(node.id);
             } else {
               onNodeClick(node.id);
@@ -565,6 +596,54 @@ const GraphView: React.FC<GraphViewProps> = ({
             )}
           </button>
         </div>
+      </div>
+
+      {/* Project Tabs */}
+      <div className={`flex items-center gap-1 px-2 py-1.5 border-b overflow-x-auto ${isDarkMode ? 'border-dark-800 bg-dark-900/50' : 'border-canopy-100 bg-white/50'}`}>
+        {projects.map(project => (
+          <button
+            key={project.id}
+            onClick={(e) => {
+              if (e.shiftKey) {
+                onRenameProject(project.id);
+              } else {
+                onSelectProject(project.id);
+              }
+            }}
+            className={`group flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all whitespace-nowrap ${
+              activeProjectId === project.id
+                ? isDarkMode
+                  ? 'bg-canopy-500/20 text-canopy-400 ring-1 ring-canopy-500/30'
+                  : 'bg-canopy-50 text-canopy-700 ring-1 ring-canopy-200'
+                : isDarkMode
+                  ? 'text-dark-400 hover:bg-dark-800 hover:text-dark-300'
+                  : 'text-dark-500 hover:bg-canopy-50/50 hover:text-dark-700'
+            }`}
+            title="Click to switch, Shift+Click to rename"
+          >
+            <span>{project.name}</span>
+            {projects.length > 1 && (
+              <X
+                className={`w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity ${isDarkMode ? 'hover:text-red-400' : 'hover:text-red-500'}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteProject(project.id);
+                }}
+              />
+            )}
+          </button>
+        ))}
+        <button
+          onClick={onCreateProject}
+          className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs transition-all border border-dashed ${
+            isDarkMode
+              ? 'text-dark-500 border-dark-700 hover:text-dark-400 hover:border-dark-600'
+              : 'text-dark-400 border-dark-200 hover:text-dark-500 hover:border-dark-300'
+          }`}
+          title="New project"
+        >
+          <Plus className="w-3 h-3" />
+        </button>
       </div>
 
       <div ref={containerRef} className="flex-1 relative overflow-hidden">

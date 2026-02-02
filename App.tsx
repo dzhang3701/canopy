@@ -284,6 +284,28 @@ const App: React.FC = () => {
     setContextNodeIds(new Set());
   };
 
+  const handleRenameProject = (id: string) => {
+    const project = projects.find(p => p.id === id);
+    if (!project) return;
+    const newName = prompt("Rename project:", project.name);
+    if (newName && newName.trim()) {
+      setProjects(prev => prev.map(p =>
+        p.id === id ? { ...p, name: newName.trim() } : p
+      ));
+    }
+  };
+
+  const handleRenameNode = (id: string) => {
+    const node = nodes.find(n => n.id === id);
+    if (!node) return;
+    const newSummary = prompt("Rename node:", node.summary);
+    if (newSummary && newSummary.trim()) {
+      setNodes(prev => prev.map(n =>
+        n.id === id ? { ...n, summary: newSummary.trim() } : n
+      ));
+    }
+  };
+
   const handleBranch = (parentId: string) => {
     setActiveNodeId(parentId);
   };
@@ -444,6 +466,8 @@ const App: React.FC = () => {
             onSelectProject={handleSelectProject}
             onCreateProject={handleCreateProject}
             onDeleteProject={handleDeleteProject}
+            onRenameProject={handleRenameProject}
+            onRenameNode={handleRenameNode}
             onArchiveNode={handleArchiveNode}
             onDeleteNode={handleDeleteNode}
             onUnarchiveNode={handleUnarchiveNode}
@@ -482,10 +506,10 @@ const App: React.FC = () => {
               <div className={`max-w-4xl mx-auto flex flex-col gap-2`}>
                 <div className={`flex items-center gap-2 text-[11px] px-1 font-medium tracking-wide uppercase ${isDarkMode ? 'text-dark-400' : 'text-dark-400'}`}>
                   <Sparkles className="w-3 h-3 text-canopy-500" />
-                  {contextNodeIds.size > 0
-                    ? `${contextNodeIds.size} NODES IN CONTEXT`
-                    : `${activePath.length} TURNS ACTIVE`
-                  }
+                  <span>{activePath.length} NODES ACTIVE</span>
+                  {contextNodeIds.size > 0 && (
+                    <span className="text-canopy-500">• {contextNodeIds.size} ADDITIONAL IN CONTEXT</span>
+                  )}
                 </div>
 
                 <form
