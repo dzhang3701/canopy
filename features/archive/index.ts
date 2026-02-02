@@ -5,8 +5,9 @@
  * without permanently deleting them. Archived nodes can be restored later.
  *
  * Exports:
- * - Types: ArchivableNode
- * - Utils: filterArchivedNodes, isNodeArchived, archiveNode, unarchiveNode, etc.
+ * - Types: ArchivableNode, ArchiveResult
+ * - Utils: archiveNodeOnly, archiveNodeWithChildren, archiveChildrenOnly,
+ *          unarchiveNode, unarchiveNodeWithChildren, filterArchivedNodes, etc.
  */
 
 export * from './types';

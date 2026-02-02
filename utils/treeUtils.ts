@@ -62,3 +62,62 @@ export function getChildCount(allNodes: ChatNode[], nodeId: string): number {
   const children = allNodes.filter(n => n.parentId === nodeId);
   return filterArchivedNodes(children).length;
 }
+
+/**
+ * Builds hierarchy showing only archived nodes.
+ * Used when viewing the archive.
+ */
+export function buildArchivedHierarchy(allNodes: ChatNode[], projectId: string): TreeDataNode | null {
+  // Get only archived nodes for this project
+  const archivedNodes = allNodes.filter(n => n.projectId === projectId && n.isArchived);
+
+  if (archivedNodes.length === 0) return null;
+
+  // Find root archived nodes (nodes whose parent is null or parent is not archived)
+  const rootArchivedNodes = archivedNodes.filter(n => {
+    if (n.parentId === null) return true;
+    const parent = allNodes.find(p => p.id === n.parentId);
+    return !parent || !parent.isArchived;
+  });
+
+  if (rootArchivedNodes.length === 0) return null;
+
+  // Build tree for each root, then combine under a virtual root
+  const build = (node: ChatNode): TreeDataNode => {
+    const children = archivedNodes
+      .filter(n => n.parentId === node.id)
+      .map(build);
+
+    return {
+      id: node.id,
+      name: node.summary,
+      children: children.length > 0 ? children : undefined,
+      data: node
+    };
+  };
+
+  // If single root, return it directly
+  if (rootArchivedNodes.length === 1) {
+    return build(rootArchivedNodes[0]);
+  }
+
+  // Multiple roots - create virtual container
+  const virtualRoot: TreeDataNode = {
+    id: '__archived_root__',
+    name: 'Archived Items',
+    children: rootArchivedNodes.map(build),
+    data: {
+      id: '__archived_root__',
+      parentId: null,
+      projectId,
+      summary: 'Archived Items',
+      userPrompt: '',
+      assistantResponse: '',
+      timestamp: 0,
+      isArchived: true,
+      isCollapsed: false
+    }
+  };
+
+  return virtualRoot;
+}

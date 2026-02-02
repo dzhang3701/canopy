@@ -7,7 +7,7 @@
  *
  * Exports:
  * - Types: ProjectDeletionResult, NodeDeletionResult
- * - Utils: deleteProject, deleteNode, getNodesAffectedByDeletion, etc.
+ * - Utils: deleteProject, deleteNodeOnly, deleteNodeWithChildren, deleteChildrenOnly, etc.
  */
 
 export * from './types';

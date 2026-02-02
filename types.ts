@@ -29,11 +29,6 @@ export interface Project {
   createdAt: number;
 }
 
-export enum ViewMode {
-  LINEAR = 'LINEAR',
-  GRAPH = 'GRAPH'
-}
-
 export interface TreeDataNode {
   id: string;
   name: string;
