@@ -309,8 +309,7 @@ const GraphView: React.FC<GraphViewProps> = ({
         if (d.data.data.isArchived) {
           onUnarchiveNode(d.data.id);
         } else if (event.shiftKey) {
-          setEditingNodeId(d.data.id);
-          setEditValue(d.data.name || "");
+          onToggleContext(d.data.id);
         } else if (event.ctrlKey || event.metaKey) {
           onToggleContext(d.data.id);
         } else {
@@ -570,8 +569,7 @@ const GraphView: React.FC<GraphViewProps> = ({
               if (node.isArchived) {
                 onUnarchiveNode(node.id);
               } else if (e.shiftKey) {
-                setEditingNodeId(node.id);
-                setEditValue(node.summary || "");
+                onToggleContext(node.id);
               } else if (e.ctrlKey || e.metaKey) {
                 onToggleContext(node.id);
               } else {

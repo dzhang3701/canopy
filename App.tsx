@@ -458,19 +458,42 @@ const App: React.FC = () => {
 
   const sidebarRef = useRef<ImperativePanelHandle>(null);
 
+  const currentSidebarSizeRef = useRef<number>(sidebarExpanded ? 50 : 25);
+
   useEffect(() => {
     const panels = sidebarRef.current;
     if (panels) {
       const targetSize = sidebarExpanded ? 50 : 25;
-      requestAnimationFrame(() => {
-        panels.resize(targetSize);
-      });
+      const currentSize = currentSidebarSizeRef.current;
+
+      // Only snap/resize if the difference is significant (>15%)
+      // This prevents fighting with the user during manual drag resizing
+      // while ensuring the toggle button still works effectivey
+      if (Math.abs(currentSize - targetSize) > 15) {
+        requestAnimationFrame(() => {
+          panels.resize(targetSize);
+        });
+      }
     }
   }, [sidebarExpanded]);
 
   return (
     <div className={`flex h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark bg-dark-950 text-dark-100' : 'bg-zinc-100/20 text-dark-800'}`}>
-      <PanelGroup direction="horizontal" className="flex-1">
+      <PanelGroup
+        direction="horizontal"
+        className="flex-1"
+        onLayout={(sizes) => {
+          const sidebarSize = sizes[0];
+          currentSidebarSizeRef.current = sidebarSize;
+
+          // Sync state with manual resize
+          if (sidebarExpanded && sidebarSize < 35) {
+            setSidebarExpanded(false);
+          } else if (!sidebarExpanded && sidebarSize > 40) {
+            setSidebarExpanded(true);
+          }
+        }}
+      >
         {/* Sidebar Panel */}
         <Panel
           id="sidebar-panel"
