@@ -9,6 +9,15 @@ import { GoogleGenAI } from "@google/genai";
 import { ChatNode } from "../types";
 import { UsageMetadata } from "../features/api-stats";
 
+export type GeminiModelId = 'gemini-2.0-flash' | 'gemini-2.0-pro-exp-02-05';
+
+export const MODELS = [
+  { id: 'gemini-2.0-flash' as GeminiModelId, name: 'Gemini 3 Flash' },
+  { id: 'gemini-2.0-pro-exp-02-05' as GeminiModelId, name: 'Gemini 3 Pro' },
+] as const;
+
+export const DEFAULT_MODEL = 'gemini-2.0-flash';
+
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
 
 // Debug: log if API key is present (not the actual key)
@@ -34,7 +43,8 @@ function getClient(): GoogleGenAI {
 export async function streamChatResponse(
   history: ChatNode[],
   newPrompt: string,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  modelId: GeminiModelId = DEFAULT_MODEL
 ): Promise<UsageMetadata | null> {
   const contents = history.map(node => [
     { role: 'user' as const, parts: [{ text: node.userPrompt }] },
@@ -44,7 +54,7 @@ export async function streamChatResponse(
   contents.push({ role: 'user' as const, parts: [{ text: newPrompt }] });
 
   const response = await getClient().models.generateContentStream({
-    model: 'gemini-2.5-flash',
+    model: modelId,
     contents: contents,
     config: {
       temperature: 0.7,
@@ -82,12 +92,13 @@ export async function streamChatResponse(
 export async function generateChatResponse(
   history: ChatNode[],
   newPrompt: string,
-  summaryOnly: boolean = false
+  summaryOnly: boolean = false,
+  modelId: GeminiModelId = DEFAULT_MODEL
 ): Promise<{ response: string; summary: string; usage: UsageMetadata | null }> {
   if (summaryOnly) {
     // Just generate the summary
     const summaryResponse = await getClient().models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: modelId,
       contents: [
         {
           role: 'user',
@@ -117,7 +128,7 @@ export async function generateChatResponse(
   contents.push({ role: 'user' as const, parts: [{ text: newPrompt }] });
 
   const response = await getClient().models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: modelId,
     contents: contents,
     config: {
       temperature: 0.7,
@@ -130,7 +141,7 @@ export async function generateChatResponse(
 
   // Generate a one-line summary
   const summaryResponse = await getClient().models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: modelId,
     contents: [
       {
         role: 'user',

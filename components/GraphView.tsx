@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react'
 import * as d3 from 'd3';
 import { ChatNode, TreeDataNode, Project } from '../types';
 import { buildHierarchy, buildArchivedHierarchy, getAncestorPath } from '../utils/treeUtils';
-import { TreePalm, Moon, Sun, List, Network, Archive, Trash2, RotateCcw, MessageSquare, Bot } from 'lucide-react';
+import { TreePalm, List, Network, Archive, Trash2, RotateCcw, MessageSquare, Bot, Settings } from 'lucide-react';
 
 interface GraphViewProps {
   nodes: ChatNode[];
@@ -15,8 +15,18 @@ interface GraphViewProps {
   focusNodeId: string | null;
   isDarkMode: boolean;
   sidebarExpanded: boolean;
+  onToggleSidebar: () => void;
+  showArchived: boolean;
+  onToggleShowArchived: () => void;
+  onNodeClick: (id: string) => void;
+  onToggleContext: (id: string) => void;
+  onArchiveNode: (id: string) => void;
   onDeleteNode: (id: string) => void;
   onUnarchiveNode: (id: string) => void;
+  onOpenSettings: () => void;
+  onSelectProject: (id: string) => void;
+  onCreateProject: () => void;
+  onDeleteProject: (id: string) => void;
 }
 
 interface TooltipState {
@@ -38,6 +48,7 @@ interface ContextMenuState {
 
 const GraphView: React.FC<GraphViewProps> = ({
   nodes,
+  projects,
   activeProjectId,
   activeNodeId,
   contextNodeIds,
@@ -46,14 +57,17 @@ const GraphView: React.FC<GraphViewProps> = ({
   isDarkMode,
   sidebarExpanded,
   onToggleSidebar,
-  onToggleDarkMode,
   showArchived,
   onToggleShowArchived,
   onNodeClick,
   onToggleContext,
   onArchiveNode,
   onDeleteNode,
-  onUnarchiveNode
+  onUnarchiveNode,
+  onOpenSettings,
+  onSelectProject,
+  onCreateProject,
+  onDeleteProject
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -188,6 +202,34 @@ const GraphView: React.FC<GraphViewProps> = ({
 
     zoomRef.current = zoom;
     svg.call(zoom);
+
+    // Specialized mouse wheel controls: 
+    // - Cmd/Ctrl + Scroll: Zoom
+    // - Shift + Scroll: Pan Horizontal
+    // - Scroll: Pan Vertical
+    svg.on("wheel.zoom", null); // Disable default wheel zoom
+    svg.on("wheel", (event) => {
+      event.preventDefault();
+      const isZoom = event.metaKey || event.ctrlKey;
+      const isHorizontal = event.shiftKey;
+      const scale = currentTransformRef.current?.k || 1;
+
+      if (isZoom) {
+        // Cmd/Ctrl + Scroll: Zoom
+        const factor = Math.pow(2, -event.deltaY * 0.002);
+        svg.call(zoom.scaleBy, factor, d3.pointer(event));
+      } else if (isHorizontal) {
+        // Shift + Scroll: Pan Horizontal
+        // Browsers/OS often swap deltaY to deltaX when Shift is held.
+        // We handle both cases to ensure it works on all platforms.
+        const dx = event.deltaX !== 0 ? event.deltaX : event.deltaY;
+        svg.call(zoom.translateBy, -dx / scale, 0);
+      } else {
+        // Regular Scroll: Vertical Pan
+        // Also support native trackpad horizontal panning via deltaX
+        svg.call(zoom.translateBy, -event.deltaX / scale, -event.deltaY / scale);
+      }
+    }, { passive: false });
 
     const treeLayout = d3.tree<TreeDataNode>()
       .nodeSize([180, 100])
@@ -549,11 +591,11 @@ const GraphView: React.FC<GraphViewProps> = ({
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={onToggleDarkMode}
+            onClick={onOpenSettings}
             className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-dark-800 text-dark-400 hover:text-dark-200' : 'hover:bg-canopy-50 text-dark-400 hover:text-dark-600'}`}
-            title={isDarkMode ? 'Light mode' : 'Dark mode'}
+            title="Settings"
           >
-            {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            <Settings className="w-4 h-4" />
           </button>
           <button
             onClick={onToggleSidebar}

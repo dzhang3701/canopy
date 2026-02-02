@@ -17,7 +17,9 @@ import {
   archiveChildrenOnly,
   deleteChildrenOnly
 } from './utils/treeUtils';
-import { Send, Loader2, Sparkles, Moon, Sun, TreePalm } from 'lucide-react';
+import { Send, Loader2, Sparkles, Moon, Sun, TreePalm, Settings } from 'lucide-react';
+import SettingsModal from './components/SettingsModal';
+import { GeminiModelId, DEFAULT_MODEL } from './services/geminiService';
 
 // Feature imports - organized by feature module
 import {
@@ -92,25 +94,55 @@ const App: React.FC = () => {
   // Archive view toggle state
   const [showArchived, setShowArchived] = useState(false);
 
-  // UI State
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    const saved = localStorage.getItem('canopy_dark_mode');
-    return saved ? JSON.parse(saved) : false;
+  // Settings state
+  const [themePreference, setThemePreference] = useState<'light' | 'dark' | 'system'>(() => {
+    const saved = localStorage.getItem('canopy_theme_preference');
+    return (saved as 'light' | 'dark' | 'system') || 'system';
   });
+  const [selectedModel, setSelectedModel] = useState<GeminiModelId>(() => {
+    const saved = localStorage.getItem('canopy_selected_model');
+    return (saved as GeminiModelId) || DEFAULT_MODEL;
+  });
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  const [isDarkMode, setIsDarkMode] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState(() => {
     const saved = localStorage.getItem('canopy_sidebar_expanded');
     return saved ? JSON.parse(saved) : false;
   });
 
-  // Dark mode effect
+  // Theme effect
   useEffect(() => {
-    localStorage.setItem('canopy_dark_mode', JSON.stringify(isDarkMode));
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
+    localStorage.setItem('canopy_theme_preference', themePreference);
+
+    const updateTheme = () => {
+      let shouldBeDark = false;
+      if (themePreference === 'system') {
+        shouldBeDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      } else {
+        shouldBeDark = themePreference === 'dark';
+      }
+      setIsDarkMode(shouldBeDark);
+      if (shouldBeDark) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    };
+
+    updateTheme();
+
+    if (themePreference === 'system') {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const listener = () => updateTheme();
+      mediaQuery.addEventListener('change', listener);
+      return () => mediaQuery.removeEventListener('change', listener);
     }
-  }, [isDarkMode]);
+  }, [themePreference]);
+
+  useEffect(() => {
+    localStorage.setItem('canopy_selected_model', selectedModel);
+  }, [selectedModel]);
 
   useEffect(() => {
     localStorage.setItem('canopy_sidebar_expanded', JSON.stringify(sidebarExpanded));
@@ -206,7 +238,7 @@ const App: React.FC = () => {
       const streamUsage = await streamChatResponse(history, promptText, (chunk) => {
         fullResponse += chunk;
         setStreamingResponse(fullResponse);
-      });
+      }, selectedModel);
 
       // Update API stats for streaming call (from api-stats feature)
       if (streamUsage) {
@@ -214,7 +246,7 @@ const App: React.FC = () => {
       }
 
       // Generate summary after streaming completes (second API call)
-      const { summary, usage: summaryUsage } = await generateChatResponse(history, promptText, true);
+      const { summary, usage: summaryUsage } = await generateChatResponse(history, promptText, true, selectedModel);
 
       // Update API stats for summary call (from api-stats feature)
       if (summaryUsage) {
@@ -436,7 +468,6 @@ const App: React.FC = () => {
             isDarkMode={isDarkMode}
             sidebarExpanded={sidebarExpanded}
             onToggleSidebar={() => setSidebarExpanded(!sidebarExpanded)}
-            onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
             showArchived={showArchived}
             onToggleShowArchived={() => setShowArchived(!showArchived)}
             onNodeClick={handleNodeClick}
@@ -447,6 +478,7 @@ const App: React.FC = () => {
             onArchiveNode={handleArchiveNode}
             onDeleteNode={handleDeleteNode}
             onUnarchiveNode={handleUnarchiveNode}
+            onOpenSettings={() => setIsSettingsOpen(true)}
           />
         </Panel>
 
@@ -540,6 +572,17 @@ const App: React.FC = () => {
         isDarkMode={isDarkMode}
         onConfirm={handleModalConfirm}
         onCancel={handleModalCancel}
+      />
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        selectedModel={selectedModel}
+        onSelectModel={setSelectedModel}
+        theme={themePreference}
+        onSelectTheme={setThemePreference}
+        isDarkMode={isDarkMode}
       />
     </div>
   );
