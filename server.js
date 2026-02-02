@@ -1,5 +1,10 @@
-const express = require('express');
-const path = require('path');
+import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 
 const PORT = process.env.PORT || 3000;
@@ -8,10 +13,10 @@ const PORT = process.env.PORT || 3000;
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // Handle SPA routing: return index.html for all non-static requests
-app.get('*', (req, res) => {
+app.get(/.*/, (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server is running on port ${PORT}`);
 });
