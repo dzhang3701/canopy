@@ -25,7 +25,6 @@ export interface ChatNode {
 export interface Project {
   id: string;
   name: string;
-  icon: string;
   createdAt: number;
 }
 

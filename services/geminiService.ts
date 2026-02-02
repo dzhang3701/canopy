@@ -92,7 +92,7 @@ export async function generateChatResponse(
         {
           role: 'user',
           parts: [{
-            text: `Summarize the following user question in exactly one concise phrase (max 5 words), capturing the main topic:
+            text: `Summarize the following user question in exactly one concise phrase (max 8 words), capturing the main topic:
             "${newPrompt}"`
           }]
         }
@@ -135,7 +135,7 @@ export async function generateChatResponse(
       {
         role: 'user',
         parts: [{
-          text: `Summarize the following interaction in exactly one concise phrase (max 5 words):
+          text: `Summarize the following interaction in exactly one concise phrase (max 8 words):
           User: ${newPrompt}
           Assistant: ${assistantText}`
         }]
@@ -148,9 +148,9 @@ export async function generateChatResponse(
   // Combine usage from both calls
   const usage: UsageMetadata = {
     inputTokens: (response.usageMetadata?.promptTokenCount || 0) +
-                 (summaryResponse.usageMetadata?.promptTokenCount || 0),
+      (summaryResponse.usageMetadata?.promptTokenCount || 0),
     outputTokens: (response.usageMetadata?.candidatesTokenCount || 0) +
-                  (summaryResponse.usageMetadata?.candidatesTokenCount || 0),
+      (summaryResponse.usageMetadata?.candidatesTokenCount || 0),
   };
 
   return { response: assistantText, summary, usage };
