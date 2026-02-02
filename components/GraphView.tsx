@@ -9,14 +9,13 @@ interface GraphViewProps {
   activeProjectId: string;
   activeNodeId: string | null;
   onNodeClick: (id: string) => void;
-  showArchived: boolean;
 }
 
-const GraphView: React.FC<GraphViewProps> = ({ nodes, activeProjectId, activeNodeId, onNodeClick, showArchived }) => {
+const GraphView: React.FC<GraphViewProps> = ({ nodes, activeProjectId, activeNodeId, onNodeClick }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const treeData = useMemo(() => buildHierarchy(nodes, activeProjectId, showArchived), [nodes, activeProjectId, showArchived]);
+  const treeData = useMemo(() => buildHierarchy(nodes, activeProjectId), [nodes, activeProjectId]);
 
   useEffect(() => {
     if (!treeData || !svgRef.current || !containerRef.current) return;
@@ -75,9 +74,8 @@ const GraphView: React.FC<GraphViewProps> = ({ nodes, activeProjectId, activeNod
       .attr("width", 200)
       .attr("height", 60)
       .attr("rx", 8)
-      .attr("fill", d => d.data.data.isArchived ? "#451a03" : "#1e293b")
+      .attr("fill", "#1e293b")
       .attr("stroke", d => {
-        if (d.data.data.isArchived) return "#f59e0b"; // Amber for archived
         if (d.data.id === activeNodeId) return "#3b82f6";
         const children = getChildCount(nodes, d.data.id);
         if (children > 1) return "#10b981"; // Green for branch
@@ -85,7 +83,6 @@ const GraphView: React.FC<GraphViewProps> = ({ nodes, activeProjectId, activeNod
         return "#475569"; // Gray for leaf
       })
       .attr("stroke-width", d => d.data.id === activeNodeId ? 3 : 2)
-      .attr("opacity", d => d.data.data.isArchived ? 0.7 : 1)
       .attr("class", d => d.data.id === activeNodeId ? "drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" : "");
 
     // Node Labels

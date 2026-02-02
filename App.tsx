@@ -1,14 +1,24 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { ChatNode, Project, ViewMode, ApiUsageStats } from './types';
+import { ChatNode, Project, ViewMode } from './types';
 import Sidebar from './components/Sidebar';
 import ChatView from './components/ChatView';
 import GraphView from './components/GraphView';
-import ApiStatsPanel, { calculateCost } from './components/ApiStatsPanel';
 import { generateChatResponse } from './services/geminiService';
 import { getAncestorPath } from './utils/treeUtils';
-import { Send, GitGraph, MessageSquare, Loader2, Sparkles, Archive } from 'lucide-react';
+import { Send, GitGraph, MessageSquare, Loader2, Sparkles } from 'lucide-react';
+
+// Feature imports - organized by feature module
+import {
+  ApiUsageStats,
+  DEFAULT_API_STATS,
+  ApiStatsPanel,
+  updateApiStats,
+  resetApiStats,
+} from './features/api-stats';
+import { deleteProject } from './features/deletion';
+import { getDefaultArchiveState } from './features/archive';
 
 const STARTER_PROJECTS: Project[] = [
   { id: 'p1', name: 'Exploration', icon: '🚀', createdAt: Date.now() },
@@ -38,10 +48,9 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.LINEAR);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [showArchived, setShowArchived] = useState(false);
   const [apiStats, setApiStats] = useState<ApiUsageStats>(() => {
     const saved = localStorage.getItem('arbor_api_stats');
-    return saved ? JSON.parse(saved) : { totalCalls: 0, inputTokens: 0, outputTokens: 0, estimatedCost: 0 };
+    return saved ? JSON.parse(saved) : DEFAULT_API_STATS;
   });
 
   // Persistence
@@ -67,9 +76,8 @@ const App: React.FC = () => {
 
   const activePath = useMemo(() => {
     if (!activeNodeId) return [];
-    const path = getAncestorPath(nodes, activeNodeId);
-    return showArchived ? path : path.filter(node => !node.isArchived);
-  }, [nodes, activeNodeId, showArchived]);
+    return getAncestorPath(nodes, activeNodeId);
+  }, [nodes, activeNodeId]);
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -83,17 +91,8 @@ const App: React.FC = () => {
       const history = activePath;
       const { response, summary, usage } = await generateChatResponse(history, promptText);
 
-      // Update API stats
-      setApiStats(prev => {
-        const newInputTokens = prev.inputTokens + usage.inputTokens;
-        const newOutputTokens = prev.outputTokens + usage.outputTokens;
-        return {
-          totalCalls: prev.totalCalls + 1,
-          inputTokens: newInputTokens,
-          outputTokens: newOutputTokens,
-          estimatedCost: calculateCost(newInputTokens, newOutputTokens),
-        };
-      });
+      // Update API stats (using api-stats feature)
+      setApiStats(prev => updateApiStats(prev, usage));
 
       const newNode: ChatNode = {
         id: uuidv4(),
@@ -103,7 +102,7 @@ const App: React.FC = () => {
         userPrompt: promptText,
         assistantResponse: response,
         timestamp: Date.now(),
-        isArchived: false,
+        isArchived: getDefaultArchiveState(),  // From archive feature
         isCollapsed: false
       };
 
@@ -132,13 +131,15 @@ const App: React.FC = () => {
     }
   };
 
+  // Project deletion handler (using deletion feature)
   const handleDeleteProject = (id: string) => {
     if (confirm("Delete project and all its nodes?")) {
-      setProjects(prev => prev.filter(p => p.id !== id));
-      setNodes(prev => prev.filter(n => n.projectId !== id));
+      const result = deleteProject(projects, nodes, id, activeProjectId);
+      setProjects(result.updatedProjects);
+      setNodes(result.updatedNodes);
       if (activeProjectId === id) {
-        setActiveProjectId(projects.find(p => p.id !== id)?.id || null);
-        setActiveNodeId(null);
+        setActiveProjectId(result.newActiveProjectId);
+        setActiveNodeId(result.newActiveNodeId);
       }
     }
   };
@@ -148,73 +149,10 @@ const App: React.FC = () => {
     setViewMode(ViewMode.LINEAR);
   };
 
+  // API stats reset handler (using api-stats feature)
   const handleResetStats = () => {
-    setApiStats({ totalCalls: 0, inputTokens: 0, outputTokens: 0, estimatedCost: 0 });
+    setApiStats(resetApiStats());
   };
-
-  // Get all descendant node IDs for a given node
-  const getDescendantIds = useCallback((nodeId: string, allNodes: ChatNode[]): string[] => {
-    const descendants: string[] = [];
-    const findChildren = (parentId: string) => {
-      allNodes.forEach(node => {
-        if (node.parentId === parentId) {
-          descendants.push(node.id);
-          findChildren(node.id);
-        }
-      });
-    };
-    findChildren(nodeId);
-    return descendants;
-  }, []);
-
-  const handleArchiveNode = useCallback((nodeId: string) => {
-    const descendantIds = getDescendantIds(nodeId, nodes);
-    const idsToArchive = [nodeId, ...descendantIds];
-
-    setNodes(prev => prev.map(node =>
-      idsToArchive.includes(node.id) ? { ...node, isArchived: true } : node
-    ));
-
-    // If active node was archived, move to parent or clear
-    if (idsToArchive.includes(activeNodeId || '')) {
-      const archivedNode = nodes.find(n => n.id === nodeId);
-      setActiveNodeId(archivedNode?.parentId || null);
-    }
-  }, [nodes, activeNodeId, getDescendantIds]);
-
-  const handleDeleteNode = useCallback((nodeId: string) => {
-    if (!confirm('Permanently delete this message and all replies? This cannot be undone.')) return;
-
-    const descendantIds = getDescendantIds(nodeId, nodes);
-    const idsToDelete = [nodeId, ...descendantIds];
-
-    setNodes(prev => prev.filter(node => !idsToDelete.includes(node.id)));
-
-    // If active node was deleted, move to parent or clear
-    if (idsToDelete.includes(activeNodeId || '')) {
-      const deletedNode = nodes.find(n => n.id === nodeId);
-      setActiveNodeId(deletedNode?.parentId || null);
-    }
-  }, [nodes, activeNodeId, getDescendantIds]);
-
-  const handleRestoreNode = useCallback((nodeId: string) => {
-    const descendantIds = getDescendantIds(nodeId, nodes);
-    const idsToRestore = [nodeId, ...descendantIds];
-
-    // Also restore ancestors to maintain valid path
-    let currentNode = nodes.find(n => n.id === nodeId);
-    const ancestorIds: string[] = [];
-    while (currentNode?.parentId) {
-      ancestorIds.push(currentNode.parentId);
-      currentNode = nodes.find(n => n.id === currentNode?.parentId);
-    }
-
-    const allIdsToRestore = [...idsToRestore, ...ancestorIds];
-
-    setNodes(prev => prev.map(node =>
-      allIdsToRestore.includes(node.id) ? { ...node, isArchived: false } : node
-    ));
-  }, [nodes, getDescendantIds]);
 
   return (
     <div className="flex h-screen w-full bg-slate-950 overflow-hidden font-sans">
@@ -247,64 +185,42 @@ const App: React.FC = () => {
             </h2>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* Archive Toggle */}
-            {nodes.some(n => n.isArchived && n.projectId === activeProjectId) && (
-              <button
-                onClick={() => setShowArchived(!showArchived)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                  showArchived ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-slate-400 hover:text-slate-200 border border-transparent'
-                }`}
-              >
-                <Archive className="w-4 h-4" />
-                {showArchived ? 'Hide Archived' : 'Show Archived'}
-              </button>
-            )}
-
-            {/* View Mode Toggle */}
-            <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-lg">
-              <button
-                onClick={() => setViewMode(ViewMode.LINEAR)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                  viewMode === ViewMode.LINEAR ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <MessageSquare className="w-4 h-4" />
-                Chat
-              </button>
-              <button
-                onClick={() => setViewMode(ViewMode.GRAPH)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                  viewMode === ViewMode.GRAPH ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <GitGraph className="w-4 h-4" />
-                Graph
-              </button>
-            </div>
+          <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-lg">
+            <button
+              onClick={() => setViewMode(ViewMode.LINEAR)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                viewMode === ViewMode.LINEAR ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <MessageSquare className="w-4 h-4" />
+              Chat
+            </button>
+            <button
+              onClick={() => setViewMode(ViewMode.GRAPH)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                viewMode === ViewMode.GRAPH ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <GitGraph className="w-4 h-4" />
+              Graph
+            </button>
           </div>
         </header>
 
         {/* View Area */}
         <main className="flex-1 overflow-hidden flex flex-col bg-slate-950">
           {viewMode === ViewMode.LINEAR ? (
-            <ChatView
-              activePath={activePath}
+            <ChatView 
+              activePath={activePath} 
               allNodes={nodes}
-              activeProjectId={activeProjectId}
               onNodeClick={setActiveNodeId}
               onBranch={handleBranch}
-              onArchive={handleArchiveNode}
-              onDelete={handleDeleteNode}
-              onRestore={handleRestoreNode}
-              showArchived={showArchived}
             />
           ) : (
-            <GraphView
-              nodes={nodes}
-              activeProjectId={activeProjectId || ''}
+            <GraphView 
+              nodes={nodes} 
+              activeProjectId={activeProjectId || ''} 
               activeNodeId={activeNodeId}
-              showArchived={showArchived}
               onNodeClick={(id) => {
                 setActiveNodeId(id);
                 setViewMode(ViewMode.LINEAR);

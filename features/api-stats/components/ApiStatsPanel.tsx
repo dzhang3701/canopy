@@ -1,19 +1,18 @@
+/**
+ * API Stats Feature - Stats Panel Component
+ *
+ * Displays API usage statistics in a collapsible panel.
+ * Shows total calls, token counts, and estimated cost.
+ */
+
 import React, { useState } from 'react';
 import { Activity, X, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
 import { ApiUsageStats } from '../types';
-
-// Gemini 2.0 Flash pricing (per 1M tokens)
-const PRICE_PER_M_INPUT = 0.10;
-const PRICE_PER_M_OUTPUT = 0.40;
+import { formatCost, formatTokens } from '../utils';
 
 interface ApiStatsPanelProps {
   stats: ApiUsageStats;
   onReset: () => void;
-}
-
-export function calculateCost(inputTokens: number, outputTokens: number): number {
-  return (inputTokens / 1_000_000) * PRICE_PER_M_INPUT +
-         (outputTokens / 1_000_000) * PRICE_PER_M_OUTPUT;
 }
 
 const ApiStatsPanel: React.FC<ApiStatsPanelProps> = ({ stats, onReset }) => {
@@ -65,16 +64,16 @@ const ApiStatsPanel: React.FC<ApiStatsPanelProps> = ({ stats, onReset }) => {
           </div>
           <div className="flex justify-between text-xs">
             <span className="text-slate-400">Input tokens</span>
-            <span className="text-slate-200 font-mono">{stats.inputTokens.toLocaleString()}</span>
+            <span className="text-slate-200 font-mono">{formatTokens(stats.inputTokens)}</span>
           </div>
           <div className="flex justify-between text-xs">
             <span className="text-slate-400">Output tokens</span>
-            <span className="text-slate-200 font-mono">{stats.outputTokens.toLocaleString()}</span>
+            <span className="text-slate-200 font-mono">{formatTokens(stats.outputTokens)}</span>
           </div>
           <div className="border-t border-slate-700 pt-2 flex justify-between text-xs">
             <span className="text-slate-400">Est. cost</span>
             <span className="text-green-400 font-mono font-medium">
-              ${stats.estimatedCost.toFixed(4)}
+              {formatCost(stats.estimatedCost)}
             </span>
           </div>
           <button

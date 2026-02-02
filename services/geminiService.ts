@@ -1,13 +1,15 @@
+/**
+ * Gemini API Service
+ *
+ * Handles communication with the Google Gemini API.
+ * Usage tracking types are imported from the api-stats feature.
+ */
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { ChatNode } from "../types";
+import { UsageMetadata } from "../features/api-stats";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-
-export interface UsageMetadata {
-  inputTokens: number;
-  outputTokens: number;
-}
 
 /**
  * Generates a response from the model based on the node hierarchy.

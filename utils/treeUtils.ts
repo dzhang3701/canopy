@@ -1,5 +1,12 @@
+/**
+ * Tree Utility Functions
+ *
+ * These functions handle tree traversal and hierarchy building.
+ * Archive-aware filtering is handled via the archive feature module.
+ */
 
 import { ChatNode, TreeDataNode } from '../types';
+import { filterArchivedNodes } from '../features/archive';
 
 /**
  * Gets the path from the root to the specified node.
@@ -20,9 +27,13 @@ export function getAncestorPath(allNodes: ChatNode[], leafNodeId: string): ChatN
 
 /**
  * Transforms flat nodes into a hierarchical tree structure for D3.
+ * Uses archive feature to filter out archived nodes.
  */
-export function buildHierarchy(allNodes: ChatNode[], projectId: string, showArchived: boolean = false): TreeDataNode | null {
-  const projectNodes = allNodes.filter(n => n.projectId === projectId && (showArchived || !n.isArchived));
+export function buildHierarchy(allNodes: ChatNode[], projectId: string): TreeDataNode | null {
+  // Filter to project nodes and exclude archived (using archive feature)
+  const projectNodes = filterArchivedNodes(
+    allNodes.filter(n => n.projectId === projectId)
+  );
   const rootNode = projectNodes.find(n => n.parentId === null);
 
   if (!rootNode) return null;
@@ -44,8 +55,10 @@ export function buildHierarchy(allNodes: ChatNode[], projectId: string, showArch
 }
 
 /**
- * Counts children for a node to determine color coding.
+ * Counts non-archived children for a node to determine color coding.
+ * Uses archive feature filtering.
  */
 export function getChildCount(allNodes: ChatNode[], nodeId: string): number {
-  return allNodes.filter(n => n.parentId === nodeId && !n.isArchived).length;
+  const children = allNodes.filter(n => n.parentId === nodeId);
+  return filterArchivedNodes(children).length;
 }
