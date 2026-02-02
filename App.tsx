@@ -103,6 +103,9 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('canopy_selected_model');
     return (saved as GeminiModelId) || DEFAULT_MODEL;
   });
+  const [userApiKey, setUserApiKey] = useState<string>(() => {
+    return localStorage.getItem('canopy_user_api_key') || '';
+  });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -143,6 +146,10 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('canopy_selected_model', selectedModel);
   }, [selectedModel]);
+
+  useEffect(() => {
+    localStorage.setItem('canopy_user_api_key', userApiKey);
+  }, [userApiKey]);
 
   useEffect(() => {
     localStorage.setItem('canopy_sidebar_expanded', JSON.stringify(sidebarExpanded));
@@ -238,7 +245,7 @@ const App: React.FC = () => {
       const streamUsage = await streamChatResponse(history, promptText, (chunk) => {
         fullResponse += chunk;
         setStreamingResponse(fullResponse);
-      }, selectedModel);
+      }, selectedModel, userApiKey);
 
       // Update API stats for streaming call (from api-stats feature)
       if (streamUsage) {
@@ -246,7 +253,7 @@ const App: React.FC = () => {
       }
 
       // Generate summary after streaming completes (second API call)
-      const { summary, usage: summaryUsage } = await generateChatResponse(history, promptText, true, selectedModel);
+      const { summary, usage: summaryUsage } = await generateChatResponse(history, promptText, true, selectedModel, userApiKey);
 
       // Update API stats for summary call (from api-stats feature)
       if (summaryUsage) {
@@ -264,22 +271,23 @@ const App: React.FC = () => {
       setFocusNodeId(newNodeId);
       // Clear focus after animation completes
       setTimeout(() => setFocusNodeId(null), 600);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to generate response:", error);
       setNodes(prev => prev.filter(n => n.id !== newNodeId));
       setActiveNodeId(activeNodeId);
-      alert("Error generating response. Please check your API key.");
+
+      const errorMsg = error.message || "Unknown error";
+      alert(`Error generating response: ${errorMsg}\n\nPlease check your API key and model selection in Settings.`);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleCreateProject = () => {
-    const name = prompt("Project name?");
-    if (name) {
+  const handleCreateProject = (name: string) => {
+    if (name && name.trim()) {
       const newProject: Project = {
         id: uuidv4(),
-        name,
+        name: name.trim(),
         createdAt: Date.now()
       };
       setProjects(prev => [...prev, newProject]);
@@ -290,17 +298,15 @@ const App: React.FC = () => {
   };
 
   const handleDeleteProject = (id: string) => {
-    if (confirm("Delete project and all its nodes?")) {
-      const updatedProjects = projects.filter(p => p.id !== id);
-      const updatedNodes = nodes.filter(n => n.projectId !== id);
-      setProjects(updatedProjects);
-      setNodes(updatedNodes);
-      if (activeProjectId === id) {
-        const nextProject = updatedProjects[0]?.id || null;
-        setActiveProjectId(nextProject);
-        setActiveNodeId(null);
-        setContextNodeIds(new Set());
-      }
+    const updatedProjects = projects.filter(p => p.id !== id);
+    const updatedNodes = nodes.filter(n => n.projectId !== id);
+    setProjects(updatedProjects);
+    setNodes(updatedNodes);
+    if (activeProjectId === id) {
+      const nextProject = updatedProjects[0]?.id || null;
+      setActiveProjectId(nextProject);
+      setActiveNodeId(null);
+      setContextNodeIds(new Set());
     }
   };
 
@@ -314,6 +320,22 @@ const App: React.FC = () => {
       setActiveNodeId(null);
     }
     setContextNodeIds(new Set());
+  };
+
+  const handleRenameProject = (id: string, newName: string) => {
+    if (newName && newName.trim()) {
+      setProjects(prev => prev.map(p =>
+        p.id === id ? { ...p, name: newName.trim() } : p
+      ));
+    }
+  };
+
+  const handleRenameNode = (id: string, newSummary: string) => {
+    if (newSummary && newSummary.trim()) {
+      setNodes(prev => prev.map(n =>
+        n.id === id ? { ...n, summary: newSummary.trim() } : n
+      ));
+    }
   };
 
   const handleBranch = (parentId: string) => {
@@ -475,6 +497,8 @@ const App: React.FC = () => {
             onSelectProject={handleSelectProject}
             onCreateProject={handleCreateProject}
             onDeleteProject={handleDeleteProject}
+            onRenameProject={handleRenameProject}
+            onRenameNode={handleRenameNode}
             onArchiveNode={handleArchiveNode}
             onDeleteNode={handleDeleteNode}
             onUnarchiveNode={handleUnarchiveNode}
@@ -514,10 +538,10 @@ const App: React.FC = () => {
               <div className={`max-w-4xl mx-auto flex flex-col gap-2`}>
                 <div className={`flex items-center gap-2 text-[11px] px-1 font-medium tracking-wide uppercase ${isDarkMode ? 'text-dark-400' : 'text-dark-400'}`}>
                   <Sparkles className="w-3 h-3 text-canopy-500" />
-                  {contextNodeIds.size > 0
-                    ? `${contextNodeIds.size} NODES IN CONTEXT`
-                    : `${activePath.length} TURNS ACTIVE`
-                  }
+                  <span>{activePath.length} NODES ACTIVE</span>
+                  {contextNodeIds.size > 0 && (
+                    <span className="text-canopy-500">• {contextNodeIds.size} ADDITIONAL IN CONTEXT</span>
+                  )}
                 </div>
 
                 <form
@@ -580,6 +604,8 @@ const App: React.FC = () => {
         onClose={() => setIsSettingsOpen(false)}
         selectedModel={selectedModel}
         onSelectModel={setSelectedModel}
+        userApiKey={userApiKey}
+        onSetApiKey={setUserApiKey}
         theme={themePreference}
         onSelectTheme={setThemePreference}
         isDarkMode={isDarkMode}

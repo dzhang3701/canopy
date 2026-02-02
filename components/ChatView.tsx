@@ -6,7 +6,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { ChatNode } from '../types';
-import { Bot, Loader2, Copy } from 'lucide-react';
+import { Bot, Loader2, Copy, Palmtree } from 'lucide-react';
 
 interface ChatViewProps {
   activePath: ChatNode[];
@@ -47,7 +47,7 @@ const ChatView: React.FC<ChatViewProps> = ({
       {activePath.length === 0 && !isLoading ? (
         <div className={`h-full flex flex-col items-center justify-center space-y-6 animate-in fade-in duration-700`}>
           <div className={`p-6 rounded-3xl ${isDarkMode ? 'bg-dark-900 shadow-premium' : 'bg-zinc-100/50 shadow-premium border border-canopy-100'}`}>
-            <Bot className={`w-12 h-12 ${isDarkMode ? 'text-canopy-500' : 'text-canopy-600'}`} />
+            <Palmtree className={`w-12 h-12 ${isDarkMode ? 'text-canopy-500' : 'text-canopy-600'}`} />
           </div>
           <div className="text-center space-y-2">
             <h2 className={`text-xl font-bold tracking-tight ${isDarkMode ? 'text-dark-100' : 'text-dark-900'}`}>Canopy</h2>
@@ -63,7 +63,7 @@ const ChatView: React.FC<ChatViewProps> = ({
               <div key={node.id} className="space-y-8 animate-in slide-in-from-bottom-2 duration-400">
                 {/* User Prompt */}
                 <div className="flex flex-col items-end pl-10 group">
-                  <div className={`px-6 py-4 rounded-[1.75rem] rounded-br-md shadow-sm text-[15px] leading-relaxed whitespace-pre-wrap transition-all ${isDarkMode
+                  <div className={`max-w-[85%] px-4 py-2 rounded-[1.25rem] rounded-br-[4px] shadow-sm text-[14px] leading-relaxed whitespace-pre-wrap transition-all ${isDarkMode
                     ? 'bg-dark-800 text-dark-50 border border-dark-700 group-hover:border-dark-600'
                     : 'bg-zinc-50/50 text-dark-900 border border-canopy-100 group-hover:border-canopy-200 shadow-sm'
                     }`}>
