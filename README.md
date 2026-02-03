@@ -1,20 +1,49 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+![Header](dist/assets/header.png)
+# Canopy
 
-# Run and deploy your AI Studio app
+Canopy is a conversational interface that lets you branch your chats into trees.
 
-This contains everything you need to run your app locally.
+Standard chat interfaces are linear, making it hard to explore multiple ideas in parallel without losing context. Canopy solves this by visualizing your conversation as a tree. You can branch off from any message to explore a new direction, while keeping the context of previous messages intact.
 
-View your app in AI Studio: https://ai.studio/apps/temp/1
+Powered by Google Gemini.
+
+## User Interface
+
+![Canopy user interface](dist/assets/image.png)
+
+## Features
+
+*   **Branching**: Create new branches from any message to explore alternative paths.
+*   **Graph Visualization**: See your entire conversation thread as a navigable tree.
+*   **Local Storage**: All data (projects, API keys, chat history) is stored locally in your browser.
+*   **Markdown & LaTeX**: Full support for code blocks and math rendering.
+*   **Theming**: Dark/Light mode support.
+
+## Stack
+
+*   React 19 + Vite
+*   Tailwind CSS (via CDN)
+*   D3.js
+*   Google GenAI SDK
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
+You'll need a Google Gemini API Key from [AI Studio](https://aistudio.google.com/app/apikey).
 
+1.  **Clone and install**
+    ```bash
+    git clone https://github.com/dzhang3701/canopy.git
+    cd canopy
+    npm install
+    ```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+2.  **Set up API key**
+    Create a `.env.local` file in the root directory:
+    ```
+    VITE_GEMINI_API_KEY=your_key_here
+    ```
+
+3.  **Run**
+    ```bash
+    npm run dev
+    ```
