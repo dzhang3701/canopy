@@ -1,4 +1,4 @@
-![Header](dist/assets/header.png)
+![Header image](assets/header.png)
 # Canopy
 
 Canopy is a conversational interface that lets you branch your chats into trees.
@@ -9,7 +9,7 @@ Powered by Google Gemini.
 
 ## User Interface
 
-![Canopy user interface](dist/assets/image.png)
+![Canopy user interface](assets/image.png)
 
 ## Features
 
